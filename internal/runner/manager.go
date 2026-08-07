@@ -67,7 +67,7 @@ func (m *Manager) Create(cfg Config) error {
 
 	// Create domain
 	domCfg := libvirt.DefaultDomainConfig(cfg.Name)
-	domCfg.DiskPath = filepath.Join(libvirt.DefaultPoolPath, diskName)
+	domCfg.DiskPath = filepath.Join("/home/me/Downloads", diskName)
 	domCfg.MemoryMB = cfg.MemoryMB
 	domCfg.CPUs = cfg.CPUs
 	domCfg.NetworkName = cfg.NetworkName
@@ -132,7 +132,7 @@ func (m *Manager) CreateWithCloudInit(cfg Config, token string) error {
 
 	// Create domain with cloud-init
 	domCfg := libvirt.DefaultDomainConfig(cfg.Name)
-	domCfg.DiskPath = filepath.Join(libvirt.DefaultPoolPath, diskName)
+	domCfg.DiskPath = filepath.Join("/home/me/Downloads", diskName)
 	domCfg.MemoryMB = cfg.MemoryMB
 	domCfg.CPUs = cfg.CPUs
 	domCfg.NetworkName = cfg.NetworkName

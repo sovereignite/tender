@@ -41,9 +41,9 @@ func (c *Client) PoolExists(name string) bool {
 
 // CloneVolume creates a new volume by cloning from the base image.
 func (c *Client) CloneVolume(poolName, name string) error {
-	pool, err := c.l.StoragePoolLookupByName("default")
+	pool, err := c.l.StoragePoolLookupByName("Downloads")
 	if err != nil {
-		return fmt.Errorf("default pool not found: %w", err)
+		return fmt.Errorf("Downloads pool not found: %w", err)
 	}
 
 	// Delete existing volume if it exists
@@ -52,7 +52,13 @@ func (c *Client) CloneVolume(poolName, name string) error {
 		c.l.StorageVolDelete(existingVol, 0)
 	}
 
-	// Create empty volume
+	// Get base image
+	baseVol, err := c.l.StorageVolLookupByName(pool, BaseImageName)
+	if err != nil {
+		return fmt.Errorf("base image not found: %w (download it first)", err)
+	}
+
+	// Clone from base image
 	newVol := libvirtxml.StorageVolume{
 		Name: name,
 		Capacity: &libvirtxml.StorageVolumeSize{
@@ -60,7 +66,7 @@ func (c *Client) CloneVolume(poolName, name string) error {
 			Unit:  "GiB",
 		},
 		Target: &libvirtxml.StorageVolumeTarget{
-			Path: "/home/me/.local/share/libvirt/images/" + name,
+			Path: "/home/me/Downloads/" + name,
 			Format: &libvirtxml.StorageVolumeTargetFormat{
 				Type: "qcow2",
 			},
@@ -72,9 +78,9 @@ func (c *Client) CloneVolume(poolName, name string) error {
 		return fmt.Errorf("failed to marshal volume XML: %w", err)
 	}
 
-	_, err = c.l.StorageVolCreateXML(pool, xml, 0)
+	_, err = c.l.StorageVolCreateXMLFrom(pool, xml, baseVol, 0)
 	if err != nil {
-		return fmt.Errorf("failed to create volume: %w", err)
+		return fmt.Errorf("failed to clone volume: %w", err)
 	}
 
 	return nil
