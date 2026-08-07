@@ -3,16 +3,34 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"strconv"
 	"time"
 
-	"github.com/spf13/cobra"
 	"github.com/sovereignite/gh-workers/internal/config"
 	"github.com/sovereignite/gh-workers/internal/github"
 	"github.com/sovereignite/gh-workers/internal/health"
+	"github.com/sovereignite/gh-workers/internal/images"
 	"github.com/sovereignite/gh-workers/internal/libvirt"
 	"github.com/sovereignite/gh-workers/internal/logging"
 	"github.com/sovereignite/gh-workers/internal/runner"
+	"github.com/spf13/cobra"
 )
+
+func imageDate(value time.Time) string {
+	if value.IsZero() {
+		return "-"
+	}
+	return value.Format("2006-01-02")
+}
+
+func imageSize(value uint64) string {
+	if value == 0 {
+		return "-"
+	}
+	const mib = 1024 * 1024
+	return strconv.FormatUint((value+mib-1)/mib, 10) + " MiB"
+}
 
 func main() {
 	cfg := config.DefaultConfig()
@@ -66,24 +84,24 @@ func main() {
 	var token string
 	var configFile string
 	var logLevel string
+	var username string
+	var poolName string
 
 	rootCmd.PersistentFlags().StringVar(&configFile, "config", "", "Config file path")
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "Log level (debug, info, warn, error)")
+	rootCmd.PersistentFlags().StringVar(&poolName, "pool", "default", "Storage pool name")
 
 	createCmd := &cobra.Command{
-		Use:   "create [name]",
+		Use:   "create",
 		Short: "Create a new runner VM",
-		Args:  cobra.ExactArgs(1),
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			name := args[0]
-
 			client, err := libvirt.NewClient()
 			if err != nil {
 				return err
 			}
-			defer client.Close()
+			defer func() { _ = client.Close() }()
 
-			// Initialize GitHub App if credentials provided
 			var ghApp *github.App
 			if appID > 0 && privateKeyPath != "" {
 				keyData, err := os.ReadFile(privateKeyPath)
@@ -103,44 +121,41 @@ func main() {
 				mgr = runner.NewManager(client)
 			}
 
-			// Ensure infrastructure
-			logger.Info("Ensuring infrastructure is ready")
-			if err := mgr.EnsureInfrastructure(); err != nil {
+			if err := mgr.EnsureInfrastructure(poolName); err != nil {
 				return err
 			}
 
-			// Create VMs
 			for i := 0; i < count; i++ {
-				vmName := name
-				if count > 1 {
-					vmName = fmt.Sprintf("%s-%d", name, i+1)
-				}
-
-				cfg := runner.DefaultConfig(vmName)
+				cfg := runner.DefaultConfig()
 				cfg.Organization = org
 				cfg.Repository = repo
+				cfg.Username = username
+				cfg.PoolName = poolName
 				cfg.Labels = labels
 				cfg.MemoryMB = memory
 				cfg.CPUs = cpus
 				cfg.Group = group
 
-				logger.Info("Creating runner %s", vmName)
 				if cloudInit {
 					if err := mgr.CreateWithCloudInit(cfg, token); err != nil {
-						return fmt.Errorf("failed to create %s: %w", vmName, err)
+						return err
 					}
 				} else {
 					if err := mgr.Create(cfg); err != nil {
-						return fmt.Errorf("failed to create %s: %w", vmName, err)
+						return err
 					}
 				}
 
-				logger.Info("Starting runner %s", vmName)
-				if err := mgr.Start(vmName); err != nil {
-					return fmt.Errorf("failed to start %s: %w", vmName, err)
+				if err := mgr.Start(cfg.Name); err != nil {
+					return err
 				}
 
-				logger.Info("Created and started: %s", vmName)
+				logger.Info("Created: %s, waiting for phone-home...", cfg.Name)
+				ph, err := mgr.WaitForPhoneHome(cfg.Name, 5*time.Minute)
+				if err != nil {
+					return fmt.Errorf("VM started but never phoned home: %w", err)
+				}
+				logger.Info("Ready: %s (%s)", cfg.Name, ph.IP)
 			}
 
 			return nil
@@ -151,13 +166,14 @@ func main() {
 	createCmd.Flags().StringSliceVarP(&labels, "labels", "l", []string{"self-hosted", "linux", "x64"}, "Runner labels")
 	createCmd.Flags().UintVarP(&memory, "memory", "m", 4096, "Memory in MB")
 	createCmd.Flags().UintVarP(&cpus, "cpus", "c", 2, "Number of CPUs")
-	createCmd.Flags().StringVarP(&org, "org", "o", "", "GitHub organization")
+	createCmd.Flags().StringVarP(&org, "org", "o", os.Getenv("GH_RUNNER_ORG"), "GitHub organization")
 	createCmd.Flags().StringVarP(&repo, "repo", "r", "", "GitHub repository")
 	createCmd.Flags().Int64Var(&appID, "app-id", 0, "GitHub App ID")
 	createCmd.Flags().StringVar(&privateKeyPath, "private-key", "", "Path to GitHub App private key")
 	createCmd.Flags().StringVarP(&group, "group", "g", "default", "Runner group")
 	createCmd.Flags().BoolVar(&cloudInit, "cloud-init", false, "Use cloud-init for runner installation")
 	createCmd.Flags().StringVar(&token, "token", "", "GitHub runner registration token")
+	createCmd.Flags().StringVarP(&username, "username", "u", os.Getenv("GH_USERNAME"), "GitHub username for SSH key import")
 
 	startCmd := &cobra.Command{
 		Use:   "start [name]",
@@ -168,7 +184,7 @@ func main() {
 			if err != nil {
 				return err
 			}
-			defer client.Close()
+			defer func() { _ = client.Close() }()
 
 			mgr := runner.NewManager(client)
 			logger.Info("Starting runner %s", args[0])
@@ -190,7 +206,7 @@ func main() {
 			if err != nil {
 				return err
 			}
-			defer client.Close()
+			defer func() { _ = client.Close() }()
 
 			mgr := runner.NewManager(client)
 			logger.Info("Stopping runner %s", args[0])
@@ -212,7 +228,7 @@ func main() {
 			if err != nil {
 				return err
 			}
-			defer client.Close()
+			defer func() { _ = client.Close() }()
 
 			mgr := runner.NewManager(client)
 			logger.Info("Destroying runner %s", args[0])
@@ -233,7 +249,7 @@ func main() {
 			if err != nil {
 				return err
 			}
-			defer client.Close()
+			defer func() { _ = client.Close() }()
 
 			mgr := runner.NewManager(client)
 			domains, err := mgr.List()
@@ -265,7 +281,7 @@ func main() {
 			if err != nil {
 				return err
 			}
-			defer client.Close()
+			defer func() { _ = client.Close() }()
 
 			mgr := runner.NewManager(client)
 			status, err := mgr.Status(args[0])
@@ -295,7 +311,7 @@ func main() {
 			if err != nil {
 				return err
 			}
-			defer client.Close()
+			defer func() { _ = client.Close() }()
 
 			mgr := runner.NewManager(client)
 			logger.Info("Waiting for runner %s to be ready", args[0])
@@ -317,7 +333,7 @@ func main() {
 			if err != nil {
 				return err
 			}
-			defer client.Close()
+			defer func() { _ = client.Close() }()
 
 			checker := health.NewChecker(client, 30*time.Second, 2*time.Minute)
 			statuses, err := checker.HealthCheck(cmd.Context())
@@ -344,7 +360,87 @@ func main() {
 		},
 	}
 
-	rootCmd.AddCommand(createCmd, startCmd, stopCmd, destroyCmd, listCmd, statusCmd, waitCmd, healthCmd)
+	consoleCmd := &cobra.Command{
+		Use:   "console [name]",
+		Short: "Open a serial console to a runner VM",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c := exec.Command("virsh", "-c", "qemu:///system", "console", args[0])
+			c.Stdin = os.Stdin
+			c.Stdout = os.Stdout
+			c.Stderr = os.Stderr
+			return c.Run()
+		},
+	}
+
+	dumpxmlCmd := &cobra.Command{
+		Use:   "dumpxml [name]",
+		Short: "Dump domain XML",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, err := libvirt.NewClient()
+			if err != nil {
+				return err
+			}
+			defer func() { _ = client.Close() }()
+
+			xml, err := client.GetDomainXML(args[0])
+			if err != nil {
+				return err
+			}
+			fmt.Println(xml)
+			return nil
+		},
+	}
+
+	imagesCmd := &cobra.Command{
+		Use:   "images",
+		Short: "Manage cloud images",
+	}
+
+	imagesListCmd := &cobra.Command{
+		Use:   "list",
+		Short: "List available cloud images",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			distro, _ := cmd.Flags().GetString("distro")
+			release, _ := cmd.Flags().GetString("release")
+			lts, _ := cmd.Flags().GetBool("lts")
+			arch, _ := cmd.Flags().GetString("arch")
+
+			filter := images.Filter{
+				Distro:  distro,
+				Release: release,
+				LTS:     lts,
+				Arch:    arch,
+			}
+
+			imgs, err := images.ListImages(filter)
+			if err != nil {
+				return err
+			}
+
+			if len(imgs) == 0 {
+				fmt.Println("No images found matching filter")
+				return nil
+			}
+
+			fmt.Printf("%-8s %-9s %-18s %-10s %-11s %-10s %-10s %-13s %-8s %s\n", "DISTRO", "RELEASE", "CODENAME", "ARCH", "SUPPORT", "RELEASED", "BUILT", "SIZE", "FORMAT", "IMAGE")
+			for _, img := range imgs {
+				fmt.Printf("%-8s %-9s %-18s %-10s %-11s %-10s %-10s %-13s %-8s %s\n", img.Distro, img.Release, img.Codename, img.Arch, img.Support, imageDate(img.ReleaseDate), imageDate(img.BuildDate), imageSize(img.Size), img.Format, img.Name)
+			}
+
+			return nil
+		},
+	}
+
+	imagesListCmd.Flags().StringP("distro", "d", "ubuntu", "Distribution (ubuntu, debian, fedora, all)")
+	imagesListCmd.Flags().StringP("release", "r", "", "Release version (e.g., 26.04)")
+	imagesListCmd.Flags().BoolP("lts", "l", false, "Only show LTS releases")
+	imagesListCmd.Flags().StringP("arch", "a", "amd64", "Architecture (amd64, arm64)")
+
+	imagesCmd.AddCommand(imagesListCmd)
+
+	rootCmd.AddCommand(createCmd, startCmd, stopCmd, destroyCmd, listCmd, statusCmd, waitCmd, healthCmd, consoleCmd, dumpxmlCmd, imagesCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

@@ -1,50 +1,50 @@
 package runner
 
-import "fmt"
+import (
+	"crypto/rand"
+	"fmt"
+)
 
-// Config holds the configuration for a GitHub Actions runner.
 type Config struct {
-	// GitHub organization or repository
 	Organization string
 	Repository   string
 
-	// Runner configuration
-	Name   string
-	Labels []string
-	Group  string
+	Name     string
+	Username string
+	Labels   []string
+	Group    string
 
-	// VM configuration
 	MemoryMB uint
 	CPUs     uint
 
-	// Network configuration
 	NetworkName string
-	Subnet      string
-
-	// Storage configuration
-	PoolName string
+	PoolName    string
+	Image       string
 }
 
-// DefaultConfig returns the default runner configuration.
-func DefaultConfig(name string) Config {
+func DefaultConfig() Config {
 	return Config{
-		Name:        name,
+		Name:        GenerateRunnerName(),
 		Labels:      []string{"self-hosted", "linux", "x64"},
 		MemoryMB:    4096,
 		CPUs:        2,
 		NetworkName: "default",
-		Subnet:      "192.168.122",
 		PoolName:    "default",
 	}
 }
 
-// Validate validates the runner configuration.
+func GenerateRunnerName() string {
+	b := make([]byte, 8)
+	_, _ = rand.Read(b)
+	return fmt.Sprintf("runner-%x", b)
+}
+
 func (c *Config) Validate() error {
 	if c.Organization == "" && c.Repository == "" {
 		return fmt.Errorf("organization or repository is required")
 	}
 	if c.Name == "" {
-		return fmt.Errorf("name is required")
+		c.Name = GenerateRunnerName()
 	}
 	return nil
 }

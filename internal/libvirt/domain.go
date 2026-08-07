@@ -1,7 +1,6 @@
 package libvirt
 
 import (
-	"crypto/rand"
 	"fmt"
 	"time"
 
@@ -9,27 +8,14 @@ import (
 	"github.com/libvirt/libvirt-go-xml"
 )
 
-// DomainConfig holds the VM configuration.
 type DomainConfig struct {
-	Name       string
-	MemoryMB   uint
-	CPUs       uint
-	DiskPath   string
+	Name        string
+	MemoryMB    uint
+	CPUs        uint
+	DiskPath    string
 	NetworkName string
-	MACAddress string
 }
 
-// DefaultDomainConfig returns the default VM configuration.
-func DefaultDomainConfig(name string) DomainConfig {
-	return DomainConfig{
-		Name:       name,
-		MemoryMB:   4096,
-		CPUs:       2,
-		NetworkName: "default",
-	}
-}
-
-// DomainStatus represents the status of a domain.
 type DomainStatus struct {
 	Name     string
 	State    string
@@ -39,13 +25,11 @@ type DomainStatus struct {
 	IP       string
 }
 
-// CreateDomain creates a new VM.
 func (c *Client) CreateDomain(cfg DomainConfig) error {
-	// Delete existing domain if it exists
 	existingDom, err := c.l.DomainLookupByName(cfg.Name)
 	if err == nil {
-		c.l.DomainDestroy(existingDom)
-		c.l.DomainUndefine(existingDom)
+		_ = c.l.DomainDestroy(existingDom)
+		_ = c.l.DomainUndefine(existingDom)
 	}
 
 	domain := libvirtxml.Domain{
@@ -67,50 +51,40 @@ func (c *Client) CreateDomain(cfg DomainConfig) error {
 				Machine: "q35",
 				Type:    "hvm",
 			},
+			Firmware: "efi",
+		},
+		Features: &libvirtxml.DomainFeatureList{
+			ACPI: &libvirtxml.DomainFeature{},
+			SMM:  &libvirtxml.DomainFeatureSMM{State: "on"},
 		},
 		Devices: &libvirtxml.DomainDeviceList{
-			Disks: []libvirtxml.DomainDisk{
-				{
-					Device: "disk",
-					Driver: &libvirtxml.DomainDiskDriver{
-						Name: "qemu",
-						Type: "qcow2",
-					},
-					Source: &libvirtxml.DomainDiskSource{
-						File: &libvirtxml.DomainDiskSourceFile{
-							File: cfg.DiskPath,
-						},
-					},
-					Target: &libvirtxml.DomainDiskTarget{
-						Dev: "vda",
-						Bus: "virtio",
-					},
+			Disks: []libvirtxml.DomainDisk{{
+				Source: &libvirtxml.DomainDiskSource{
+					File: &libvirtxml.DomainDiskSourceFile{File: cfg.DiskPath},
 				},
-			},
-			Interfaces: []libvirtxml.DomainInterface{
-				{
-					Source: &libvirtxml.DomainInterfaceSource{
-						Network: &libvirtxml.DomainInterfaceSourceNetwork{
-							Network: cfg.NetworkName,
-						},
-					},
-					Model: &libvirtxml.DomainInterfaceModel{
-						Type: "virtio",
-					},
+				Target: &libvirtxml.DomainDiskTarget{Dev: "vda", Bus: "virtio"},
+				Driver: &libvirtxml.DomainDiskDriver{Name: "qemu", Type: "qcow2"},
+			}},
+			Interfaces: []libvirtxml.DomainInterface{{
+				Source: &libvirtxml.DomainInterfaceSource{
+					Network: &libvirtxml.DomainInterfaceSourceNetwork{Network: cfg.NetworkName},
 				},
-			},
-			Graphics: []libvirtxml.DomainGraphic{
-				{
-					Spice: &libvirtxml.DomainGraphicSpice{},
+				Model: &libvirtxml.DomainInterfaceModel{Type: "virtio"},
+			}},
+			Serials:  []libvirtxml.DomainSerial{{}},
+			Consoles: []libvirtxml.DomainConsole{{}},
+			TPMs: []libvirtxml.DomainTPM{{
+				Backend: &libvirtxml.DomainTPMBackend{
+					Emulator: &libvirtxml.DomainTPMBackendEmulator{Version: "2.0"},
 				},
-			},
-			Videos: []libvirtxml.DomainVideo{
-				{
-					Model: libvirtxml.DomainVideoModel{
-						Type: "virtio",
-					},
-				},
-			},
+			}},
+			VSock: &libvirtxml.DomainVSock{},
+			Graphics: []libvirtxml.DomainGraphic{{
+				Spice: &libvirtxml.DomainGraphicSpice{},
+			}},
+			Videos: []libvirtxml.DomainVideo{{
+				Model: libvirtxml.DomainVideoModel{Type: "virtio"},
+			}},
 		},
 	}
 
@@ -127,72 +101,47 @@ func (c *Client) CreateDomain(cfg DomainConfig) error {
 	return nil
 }
 
-// DomainExists checks if a domain exists.
 func (c *Client) DomainExists(name string) bool {
 	_, err := c.l.DomainLookupByName(name)
 	return err == nil
 }
 
-// StartDomain starts a domain.
 func (c *Client) StartDomain(name string) error {
 	dom, err := c.l.DomainLookupByName(name)
 	if err != nil {
 		return fmt.Errorf("domain not found: %w", err)
 	}
-
-	if err := c.l.DomainCreate(dom); err != nil {
-		return fmt.Errorf("failed to start domain: %w", err)
-	}
-
-	return nil
+	return c.l.DomainCreate(dom)
 }
 
-// StopDomain stops a domain gracefully.
 func (c *Client) StopDomain(name string) error {
 	dom, err := c.l.DomainLookupByName(name)
 	if err != nil {
 		return fmt.Errorf("domain not found: %w", err)
 	}
-
-	if err := c.l.DomainShutdown(dom); err != nil {
-		return fmt.Errorf("failed to stop domain: %w", err)
-	}
-
-	return nil
+	return c.l.DomainShutdown(dom)
 }
 
-// ForceStopDomain forcefully stops a domain.
 func (c *Client) ForceStopDomain(name string) error {
 	dom, err := c.l.DomainLookupByName(name)
 	if err != nil {
 		return fmt.Errorf("domain not found: %w", err)
 	}
-
-	if err := c.l.DomainDestroy(dom); err != nil {
-		return fmt.Errorf("failed to force stop domain: %w", err)
-	}
-
-	return nil
+	return c.l.DomainDestroy(dom)
 }
 
-// DestroyDomain destroys and undefines a domain.
 func (c *Client) DestroyDomain(name string) error {
 	dom, err := c.l.DomainLookupByName(name)
 	if err != nil {
 		return fmt.Errorf("domain not found: %w", err)
 	}
-
-	// Try to stop if running
-	c.l.DomainDestroy(dom)
-
-	if err := c.l.DomainUndefine(dom); err != nil {
-		return fmt.Errorf("failed to undefine domain: %w", err)
+	_ = c.l.DomainDestroy(dom)
+	if err := c.l.DomainUndefineFlags(dom, libvirt.DomainUndefineNvram); err != nil {
+		_ = c.l.DomainUndefine(dom)
 	}
-
 	return nil
 }
 
-// GetDomainStatus returns the status of a domain.
 func (c *Client) GetDomainStatus(name string) (*DomainStatus, error) {
 	dom, err := c.l.DomainLookupByName(name)
 	if err != nil {
@@ -234,7 +183,6 @@ func (c *Client) GetDomainStatus(name string) (*DomainStatus, error) {
 	}, nil
 }
 
-// WaitForDomainIP waits for a domain to get an IP address.
 func (c *Client) WaitForDomainIP(name string, timeout time.Duration) (string, error) {
 	dom, err := c.l.DomainLookupByName(name)
 	if err != nil {
@@ -259,15 +207,18 @@ func (c *Client) WaitForDomainIP(name string, timeout time.Duration) (string, er
 	return "", fmt.Errorf("timeout waiting for IP")
 }
 
-func generateMAC() string {
-	buf := make([]byte, 6)
-	rand.Read(buf)
-	// Set local bit and clear multicast bit
-	buf[0] = (buf[0] | 0x02) & 0xfe
-	return fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x", buf[0], buf[1], buf[2], buf[3], buf[4], buf[5])
+func (c *Client) GetDomainXML(name string) (string, error) {
+	dom, err := c.l.DomainLookupByName(name)
+	if err != nil {
+		return "", fmt.Errorf("domain not found: %w", err)
+	}
+	xmlStr, err := c.l.DomainGetXMLDesc(dom, 0)
+	if err != nil {
+		return "", fmt.Errorf("failed to get domain XML: %w", err)
+	}
+	return xmlStr, nil
 }
 
-// ListDomains lists all domains.
 func (c *Client) ListDomains() ([]DomainStatus, error) {
 	flags := libvirt.ConnectListDomainsActive | libvirt.ConnectListDomainsInactive
 	domains, _, err := c.l.ConnectListAllDomains(1, flags)

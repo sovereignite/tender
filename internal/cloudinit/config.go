@@ -17,14 +17,16 @@ type Config struct {
 	Group        string
 
 	// System configuration
-	Hostname   string
-	Username   string
-	Password   string
+	Hostname string
+	Username string
 
 	// Network configuration
 	IP      string
 	Gateway string
 	DNS     []string
+
+	// Phone home
+	PhoneHomeURL string
 }
 
 // DefaultConfig returns a default cloud-init configuration.
@@ -35,8 +37,7 @@ func DefaultConfig(name, org, token string) Config {
 		Token:        token,
 		Labels:       []string{"self-hosted", "linux", "x64"},
 		Hostname:     name,
-		Username:     "runner",
-		Password:     "runner",
+		Username:     "ubuntu",
 		DNS:          []string{"8.8.8.8", "8.8.4.4"},
 	}
 }
@@ -51,8 +52,8 @@ users:
   - name: {{ .Username }}
     sudo: ALL=(ALL) NOPASSWD:ALL
     shell: /bin/bash
-    lock_passwd: false
-    passwd: {{ .Password }}
+    lock_passwd: true
+    ssh_import_id: gh:{{ .Username }}
 
 packages:
   - curl
@@ -101,6 +102,11 @@ write_files:
               addresses: [{{ joinDNS .DNS }}]
 
 final_message: "GitHub Actions runner {{ .RunnerName }} is ready!"
+
+phone_home:
+  url: {{ .PhoneHomeURL }}
+  post: all
+  tries: 10
 `
 
 	t, err := template.New("cloudinit").Funcs(template.FuncMap{

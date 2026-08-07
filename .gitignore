@@ -9,6 +9,9 @@
 # Nix/direnv cache
 .direnv/
 
+# User-specific env
+.env.local
+
 # OS files
 .DS_Store
 Thumbs.db
