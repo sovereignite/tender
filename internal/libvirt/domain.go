@@ -105,17 +105,10 @@ func (c *Client) CreateDomain(cfg DomainConfig) error {
 					Spice: &libvirtxml.DomainGraphicSpice{},
 				},
 			},
-			Channels: []libvirtxml.DomainChannel{
+			Videos: []libvirtxml.DomainVideo{
 				{
-					Source: &libvirtxml.DomainChardevSource{
-						UNIX: &libvirtxml.DomainChardevSourceUNIX{
-							Mode: "bind",
-						},
-					},
-					Target: &libvirtxml.DomainChannelTarget{
-						VirtIO: &libvirtxml.DomainChannelTargetVirtIO{
-							Name: "org.qemu.guest_agent.0",
-						},
+					Model: libvirtxml.DomainVideoModel{
+						Type: "virtio",
 					},
 				},
 			},
