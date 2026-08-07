@@ -6,16 +6,51 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/sovereignite/gh-workers/internal/config"
 	"github.com/sovereignite/gh-workers/internal/github"
+	"github.com/sovereignite/gh-workers/internal/health"
 	"github.com/sovereignite/gh-workers/internal/libvirt"
+	"github.com/sovereignite/gh-workers/internal/logging"
 	"github.com/sovereignite/gh-workers/internal/runner"
 )
 
 func main() {
+	cfg := config.DefaultConfig()
+	var logger *logging.Logger
+
 	rootCmd := &cobra.Command{
 		Use:   "gh-runner",
 		Short: "GitHub Actions runner VM manager",
 		Long:  "Manage self-hosted GitHub Actions runner VMs using libvirt",
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			// Load config file if specified
+			configFile, _ := cmd.Flags().GetString("config")
+			if configFile != "" {
+				loaded, err := config.Load(configFile)
+				if err != nil {
+					return fmt.Errorf("failed to load config: %w", err)
+				}
+				cfg = *loaded
+			}
+
+			// Initialize logger
+			logLevel, _ := cmd.Flags().GetString("log-level")
+			level, err := logging.ParseLevel(logLevel)
+			if err != nil {
+				return fmt.Errorf("invalid log level: %w", err)
+			}
+
+			if cfg.Logging.File != "" {
+				logger, err = logging.NewFromFile(level, cfg.Logging.File)
+				if err != nil {
+					return fmt.Errorf("failed to create logger: %w", err)
+				}
+			} else {
+				logger = logging.New(level, os.Stderr)
+			}
+
+			return nil
+		},
 	}
 
 	var count int
@@ -28,6 +63,11 @@ func main() {
 	var privateKeyPath string
 	var group string
 	var cloudInit bool
+	var configFile string
+	var logLevel string
+
+	rootCmd.PersistentFlags().StringVar(&configFile, "config", "", "Config file path")
+	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "Log level (debug, info, warn, error)")
 
 	createCmd := &cobra.Command{
 		Use:   "create [name]",
@@ -63,6 +103,7 @@ func main() {
 			}
 
 			// Ensure infrastructure
+			logger.Info("Ensuring infrastructure is ready")
 			if err := mgr.EnsureInfrastructure(); err != nil {
 				return err
 			}
@@ -82,6 +123,7 @@ func main() {
 				cfg.CPUs = cpus
 				cfg.Group = group
 
+				logger.Info("Creating runner %s", vmName)
 				if cloudInit && ghApp != nil {
 					if err := mgr.CreateWithCloudInit(cfg); err != nil {
 						return fmt.Errorf("failed to create %s: %w", vmName, err)
@@ -92,11 +134,12 @@ func main() {
 					}
 				}
 
+				logger.Info("Starting runner %s", vmName)
 				if err := mgr.Start(vmName); err != nil {
 					return fmt.Errorf("failed to start %s: %w", vmName, err)
 				}
 
-				fmt.Printf("Created and started: %s\n", vmName)
+				logger.Info("Created and started: %s", vmName)
 			}
 
 			return nil
@@ -126,11 +169,12 @@ func main() {
 			defer client.Close()
 
 			mgr := runner.NewManager(client)
+			logger.Info("Starting runner %s", args[0])
 			if err := mgr.Start(args[0]); err != nil {
 				return err
 			}
 
-			fmt.Printf("Started: %s\n", args[0])
+			logger.Info("Started: %s", args[0])
 			return nil
 		},
 	}
@@ -147,11 +191,12 @@ func main() {
 			defer client.Close()
 
 			mgr := runner.NewManager(client)
+			logger.Info("Stopping runner %s", args[0])
 			if err := mgr.Stop(args[0]); err != nil {
 				return err
 			}
 
-			fmt.Printf("Stopped: %s\n", args[0])
+			logger.Info("Stopped: %s", args[0])
 			return nil
 		},
 	}
@@ -168,11 +213,12 @@ func main() {
 			defer client.Close()
 
 			mgr := runner.NewManager(client)
+			logger.Info("Destroying runner %s", args[0])
 			if err := mgr.Destroy(args[0]); err != nil {
 				return err
 			}
 
-			fmt.Printf("Destroyed: %s\n", args[0])
+			logger.Info("Destroyed: %s", args[0])
 			return nil
 		},
 	}
@@ -250,17 +296,53 @@ func main() {
 			defer client.Close()
 
 			mgr := runner.NewManager(client)
+			logger.Info("Waiting for runner %s to be ready", args[0])
 			ip, err := mgr.WaitForReady(args[0], 2*time.Minute)
 			if err != nil {
 				return err
 			}
 
-			fmt.Printf("Ready: %s (%s)\n", args[0], ip)
+			logger.Info("Ready: %s (%s)", args[0], ip)
 			return nil
 		},
 	}
 
-	rootCmd.AddCommand(createCmd, startCmd, stopCmd, destroyCmd, listCmd, statusCmd, waitCmd)
+	healthCmd := &cobra.Command{
+		Use:   "health",
+		Short: "Check runner health",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, err := libvirt.NewClient()
+			if err != nil {
+				return err
+			}
+			defer client.Close()
+
+			checker := health.NewChecker(client, 30*time.Second, 2*time.Minute)
+			statuses, err := checker.HealthCheck(cmd.Context())
+			if err != nil {
+				return err
+			}
+
+			if len(statuses) == 0 {
+				fmt.Println("No runners found")
+				return nil
+			}
+
+			fmt.Printf("%-20s %-10s %-10s %-15s\n", "NAME", "HEALTHY", "STATE", "IP")
+			fmt.Println("------------------------------------------------------------")
+			for _, s := range statuses {
+				healthy := "no"
+				if s.Healthy {
+					healthy = "yes"
+				}
+				fmt.Printf("%-20s %-10s %-10s %-15s\n", s.Name, healthy, s.State, s.IP)
+			}
+
+			return nil
+		},
+	}
+
+	rootCmd.AddCommand(createCmd, startCmd, stopCmd, destroyCmd, listCmd, statusCmd, waitCmd, healthCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
