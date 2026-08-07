@@ -1,6 +1,7 @@
 package libvirt
 
 import (
+	"crypto/rand"
 	"fmt"
 	"time"
 
@@ -24,7 +25,7 @@ func DefaultDomainConfig(name string) DomainConfig {
 		Name:       name,
 		MemoryMB:   4096,
 		CPUs:       2,
-		NetworkName: DefaultNetworkName,
+		NetworkName: "default",
 	}
 }
 
@@ -40,6 +41,13 @@ type DomainStatus struct {
 
 // CreateDomain creates a new VM.
 func (c *Client) CreateDomain(cfg DomainConfig) error {
+	// Delete existing domain if it exists
+	existingDom, err := c.l.DomainLookupByName(cfg.Name)
+	if err == nil {
+		c.l.DomainDestroy(existingDom)
+		c.l.DomainUndefine(existingDom)
+	}
+
 	domain := libvirtxml.Domain{
 		Type: "kvm",
 		Name: cfg.Name,
@@ -85,9 +93,6 @@ func (c *Client) CreateDomain(cfg DomainConfig) error {
 					},
 					Model: &libvirtxml.DomainInterfaceModel{
 						Type: "virtio",
-					},
-					MAC: &libvirtxml.DomainInterfaceMAC{
-						Address: cfg.MACAddress,
 					},
 				},
 			},
@@ -256,6 +261,14 @@ func (c *Client) WaitForDomainIP(name string, timeout time.Duration) (string, er
 	}
 
 	return "", fmt.Errorf("timeout waiting for IP")
+}
+
+func generateMAC() string {
+	buf := make([]byte, 6)
+	rand.Read(buf)
+	// Set local bit and clear multicast bit
+	buf[0] = (buf[0] | 0x02) & 0xfe
+	return fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x", buf[0], buf[1], buf[2], buf[3], buf[4], buf[5])
 }
 
 // ListDomains lists all domains.

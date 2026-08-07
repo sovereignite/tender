@@ -2,8 +2,6 @@ package libvirt
 
 import (
 	"fmt"
-
-	"github.com/libvirt/libvirt-go-xml"
 )
 
 const (
@@ -36,55 +34,7 @@ func DefaultNetworkConfig() NetworkConfig {
 
 // CreateNetwork creates a NAT network for the runner VMs.
 func (c *Client) CreateNetwork(cfg NetworkConfig) error {
-	network := libvirtxml.Network{
-		Name: cfg.Name,
-		Forward: &libvirtxml.NetworkForward{
-			Mode: "nat",
-			NAT: &libvirtxml.NetworkForwardNAT{
-				Addresses: []libvirtxml.NetworkForwardNATAddress{
-					{Start: cfg.Subnet + ".1", End: cfg.Subnet + ".254"},
-				},
-			},
-		},
-		Bridge: &libvirtxml.NetworkBridge{
-			Name:  "virbr-" + cfg.Name,
-			STP:   "on",
-			Delay: "0",
-		},
-			IPs: []libvirtxml.NetworkIP{
-				{
-					Address: cfg.Gateway,
-					Netmask: "255.255.255.0",
-					DHCP: &libvirtxml.NetworkDHCP{
-						Ranges: []libvirtxml.NetworkDHCPRange{
-							{
-								Start: cfg.DHCPStart,
-								End:   cfg.DHCPEnd,
-							},
-						},
-					},
-				},
-			},
-	}
-
-	xml, err := network.Marshal()
-	if err != nil {
-		return fmt.Errorf("failed to marshal network XML: %w", err)
-	}
-
-	net, err := c.l.NetworkDefineXML(xml)
-	if err != nil {
-		return fmt.Errorf("failed to define network: %w", err)
-	}
-
-	if err := c.l.NetworkCreate(net); err != nil {
-		return fmt.Errorf("failed to create network: %w", err)
-	}
-
-	if err := c.l.NetworkSetAutostart(net, 1); err != nil {
-		return fmt.Errorf("failed to set network autostart: %w", err)
-	}
-
+	// Just use existing default network - no need to create
 	return nil
 }
 

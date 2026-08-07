@@ -32,9 +32,9 @@ func DefaultConfig(name string) Config {
 		Labels:      []string{"self-hosted", "linux", "x64"},
 		MemoryMB:    4096,
 		CPUs:        2,
-		NetworkName: "gh-runners",
+		NetworkName: "default",
 		Subnet:      "192.168.122",
-		PoolName:    "gh-runners",
+		PoolName:    "default",
 	}
 }
 
