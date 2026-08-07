@@ -64,6 +64,10 @@ func (c *Client) CreateDomain(cfg DomainConfig) error {
 				Machine: "q35",
 				Type:    "hvm",
 			},
+			BootDevices: []libvirtxml.DomainBootDevice{
+				{Dev: "network"},
+				{Dev: "hd"},
+			},
 		},
 		Devices: &libvirtxml.DomainDeviceList{
 			Disks: []libvirtxml.DomainDisk{
