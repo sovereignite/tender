@@ -1,0 +1,48 @@
+repos:
+  - repo: builtin
+    hooks:
+      - id: check-added-large-files
+        args: [--maxkb=1024, --enforce-all]
+      - id: check-case-conflict
+      - id: check-executables-have-shebangs
+      - id: check-illegal-windows-names
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-shebang-scripts-are-executable
+      - id: check-symlinks
+      - id: check-toml
+      - id: check-yaml
+      - id: detect-private-key
+      - id: forbid-new-submodules
+      - id: mixed-line-ending
+        args: [--fix=no]
+
+  - repo: local
+    hooks:
+      - id: repository-file-policy
+        name: repository file policy
+        entry: go run ./cmd/repo-check
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: gitleaks
+        name: gitleaks
+        entry: gitleaks git --staged --redact --no-banner
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: go-test
+        name: go test
+        entry: go test ./...
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: golangci-lint
+        name: golangci-lint
+        entry: golangci-lint run
+        language: system
+        pass_filenames: false
+        always_run: true

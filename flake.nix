@@ -68,6 +68,7 @@
               go-task
               golangci-lint
               gotools
+              gitleaks
               just
               kpt
               kubeconform
@@ -81,6 +82,7 @@
               kube-linter
               kustomize-lint
               starpls
+              prek
               yaml-language-server
               
               # Optional container runtime for container-backed KRM functions. Choose one.
