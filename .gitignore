@@ -1,0 +1,14 @@
+# Binaries (ignore root binary, not cmd directory)
+/gh-runner
+*.exe
+
+# Go build cache
+*.test
+*.out
+
+# Nix/direnv cache
+.direnv/
+
+# OS files
+.DS_Store
+Thumbs.db
