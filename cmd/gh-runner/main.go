@@ -63,6 +63,7 @@ func main() {
 	var privateKeyPath string
 	var group string
 	var cloudInit bool
+	var token string
 	var configFile string
 	var logLevel string
 
@@ -124,8 +125,8 @@ func main() {
 				cfg.Group = group
 
 				logger.Info("Creating runner %s", vmName)
-				if cloudInit && ghApp != nil {
-					if err := mgr.CreateWithCloudInit(cfg); err != nil {
+				if cloudInit {
+					if err := mgr.CreateWithCloudInit(cfg, token); err != nil {
 						return fmt.Errorf("failed to create %s: %w", vmName, err)
 					}
 				} else {
@@ -156,6 +157,7 @@ func main() {
 	createCmd.Flags().StringVar(&privateKeyPath, "private-key", "", "Path to GitHub App private key")
 	createCmd.Flags().StringVarP(&group, "group", "g", "default", "Runner group")
 	createCmd.Flags().BoolVar(&cloudInit, "cloud-init", false, "Use cloud-init for runner installation")
+	createCmd.Flags().StringVar(&token, "token", "", "GitHub runner registration token")
 
 	startCmd := &cobra.Command{
 		Use:   "start [name]",

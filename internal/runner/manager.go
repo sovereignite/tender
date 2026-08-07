@@ -80,19 +80,22 @@ func (m *Manager) Create(cfg Config) error {
 }
 
 // CreateWithCloudInit creates a new runner VM with cloud-init configuration.
-func (m *Manager) CreateWithCloudInit(cfg Config) error {
+func (m *Manager) CreateWithCloudInit(cfg Config, token string) error {
 	if err := cfg.Validate(); err != nil {
 		return fmt.Errorf("invalid config: %w", err)
 	}
 
-	// Get registration token from GitHub App
-	var token string
-	if m.github != nil {
+	// If no token provided, try GitHub App
+	if token == "" && m.github != nil {
 		t, err := m.github.GetRunnerRegistrationToken()
 		if err != nil {
 			return fmt.Errorf("failed to get runner token: %w", err)
 		}
 		token = t.Token
+	}
+
+	if token == "" {
+		return fmt.Errorf("token is required (use --token or GitHub App)")
 	}
 
 	// Generate cloud-init configuration

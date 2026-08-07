@@ -61,7 +61,7 @@ func (c *Client) CreateDomain(cfg DomainConfig) error {
 		OS: &libvirtxml.DomainOS{
 			Type: &libvirtxml.DomainOSType{
 				Arch:    "x86_64",
-				Machine: "pc",
+				Machine: "q35",
 				Type:    "hvm",
 			},
 		},
