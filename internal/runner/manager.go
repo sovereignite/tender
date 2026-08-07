@@ -2,20 +2,29 @@ package runner
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/sovereignite/gh-workers/internal/cloudinit"
+	"github.com/sovereignite/gh-workers/internal/github"
 	"github.com/sovereignite/gh-workers/internal/libvirt"
 )
 
 // Manager manages GitHub Actions runner VMs.
 type Manager struct {
 	client *libvirt.Client
+	github *github.App
 }
 
 // NewManager creates a new runner manager.
 func NewManager(client *libvirt.Client) *Manager {
 	return &Manager{client: client}
+}
+
+// NewManagerWithGitHub creates a new runner manager with GitHub App integration.
+func NewManagerWithGitHub(client *libvirt.Client, app *github.App) *Manager {
+	return &Manager{client: client, github: app}
 }
 
 // EnsureInfrastructure ensures the libvirt infrastructure is ready.
@@ -57,6 +66,68 @@ func (m *Manager) Create(cfg Config) error {
 	}
 
 	// Create domain
+	domCfg := libvirt.DefaultDomainConfig(cfg.Name)
+	domCfg.DiskPath = filepath.Join(libvirt.DefaultPoolPath, diskName)
+	domCfg.MemoryMB = cfg.MemoryMB
+	domCfg.CPUs = cfg.CPUs
+	domCfg.NetworkName = cfg.NetworkName
+
+	if err := m.client.CreateDomain(domCfg); err != nil {
+		return fmt.Errorf("failed to create domain: %w", err)
+	}
+
+	return nil
+}
+
+// CreateWithCloudInit creates a new runner VM with cloud-init configuration.
+func (m *Manager) CreateWithCloudInit(cfg Config) error {
+	if err := cfg.Validate(); err != nil {
+		return fmt.Errorf("invalid config: %w", err)
+	}
+
+	// Get registration token from GitHub App
+	var token string
+	if m.github != nil {
+		t, err := m.github.GetRunnerRegistrationToken()
+		if err != nil {
+			return fmt.Errorf("failed to get runner token: %w", err)
+		}
+		token = t.Token
+	}
+
+	// Generate cloud-init configuration
+	cloudCfg := cloudinit.DefaultConfig(cfg.Name, cfg.Organization, token)
+	cloudCfg.Labels = cfg.Labels
+	cloudCfg.Group = cfg.Group
+
+	userData, err := cloudinit.GenerateUserData(cloudCfg)
+	if err != nil {
+		return fmt.Errorf("failed to generate user data: %w", err)
+	}
+
+	metaData := cloudinit.GenerateMetaConfig(cloudCfg)
+
+	// Write cloud-init files
+	cloudInitDir := filepath.Join("/tmp", cfg.Name, "cloud-init")
+	if err := os.MkdirAll(cloudInitDir, 0755); err != nil {
+		return fmt.Errorf("failed to create cloud-init directory: %w", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(cloudInitDir, "user-data"), []byte(userData), 0644); err != nil {
+		return fmt.Errorf("failed to write user-data: %w", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(cloudInitDir, "meta-data"), []byte(metaData), 0644); err != nil {
+		return fmt.Errorf("failed to write meta-data: %w", err)
+	}
+
+	// Clone volume from base image
+	diskName := cfg.Name + ".qcow2"
+	if err := m.client.CloneVolume(cfg.PoolName, diskName); err != nil {
+		return fmt.Errorf("failed to clone volume: %w", err)
+	}
+
+	// Create domain with cloud-init
 	domCfg := libvirt.DefaultDomainConfig(cfg.Name)
 	domCfg.DiskPath = filepath.Join(libvirt.DefaultPoolPath, diskName)
 	domCfg.MemoryMB = cfg.MemoryMB

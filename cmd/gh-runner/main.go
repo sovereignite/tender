@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/sovereignite/gh-workers/internal/github"
 	"github.com/sovereignite/gh-workers/internal/libvirt"
 	"github.com/sovereignite/gh-workers/internal/runner"
 )
@@ -23,6 +24,10 @@ func main() {
 	var cpus uint
 	var org string
 	var repo string
+	var appID int64
+	var privateKeyPath string
+	var group string
+	var cloudInit bool
 
 	createCmd := &cobra.Command{
 		Use:   "create [name]",
@@ -37,7 +42,25 @@ func main() {
 			}
 			defer client.Close()
 
-			mgr := runner.NewManager(client)
+			// Initialize GitHub App if credentials provided
+			var ghApp *github.App
+			if appID > 0 && privateKeyPath != "" {
+				keyData, err := os.ReadFile(privateKeyPath)
+				if err != nil {
+					return fmt.Errorf("failed to read private key: %w", err)
+				}
+				ghApp, err = github.NewApp(appID, keyData, org)
+				if err != nil {
+					return fmt.Errorf("failed to create GitHub App: %w", err)
+				}
+			}
+
+			var mgr *runner.Manager
+			if ghApp != nil {
+				mgr = runner.NewManagerWithGitHub(client, ghApp)
+			} else {
+				mgr = runner.NewManager(client)
+			}
 
 			// Ensure infrastructure
 			if err := mgr.EnsureInfrastructure(); err != nil {
@@ -57,9 +80,16 @@ func main() {
 				cfg.Labels = labels
 				cfg.MemoryMB = memory
 				cfg.CPUs = cpus
+				cfg.Group = group
 
-				if err := mgr.Create(cfg); err != nil {
-					return fmt.Errorf("failed to create %s: %w", vmName, err)
+				if cloudInit && ghApp != nil {
+					if err := mgr.CreateWithCloudInit(cfg); err != nil {
+						return fmt.Errorf("failed to create %s: %w", vmName, err)
+					}
+				} else {
+					if err := mgr.Create(cfg); err != nil {
+						return fmt.Errorf("failed to create %s: %w", vmName, err)
+					}
 				}
 
 				if err := mgr.Start(vmName); err != nil {
@@ -79,6 +109,10 @@ func main() {
 	createCmd.Flags().UintVarP(&cpus, "cpus", "c", 2, "Number of CPUs")
 	createCmd.Flags().StringVarP(&org, "org", "o", "", "GitHub organization")
 	createCmd.Flags().StringVarP(&repo, "repo", "r", "", "GitHub repository")
+	createCmd.Flags().Int64Var(&appID, "app-id", 0, "GitHub App ID")
+	createCmd.Flags().StringVar(&privateKeyPath, "private-key", "", "Path to GitHub App private key")
+	createCmd.Flags().StringVarP(&group, "group", "g", "default", "Runner group")
+	createCmd.Flags().BoolVar(&cloudInit, "cloud-init", false, "Use cloud-init for runner installation")
 
 	startCmd := &cobra.Command{
 		Use:   "start [name]",
