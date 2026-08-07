@@ -165,7 +165,7 @@ func (m *Manager) Destroy(name string) error {
 
 	// Delete volume
 	diskName := name + ".qcow2"
-	if err := m.client.DeleteVolume(libvirt.DefaultPoolName, diskName); err != nil {
+	if err := m.client.DeleteVolume("default", diskName); err != nil {
 		return fmt.Errorf("failed to delete volume: %w", err)
 	}
 
