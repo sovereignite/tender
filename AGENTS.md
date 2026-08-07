@@ -37,9 +37,19 @@ gh-workers/
 │   │   ├── domain.go            # VM lifecycle
 │   │   ├── network.go           # NAT network (192.168.122.0/24)
 │   │   └── storage.go           # Disk/volume management
-│   └── runner/                  # GitHub runner management
-│       ├── config.go            # Runner configuration
-│       └── manager.go           # High-level VM operations
+│   ├── runner/                  # GitHub runner management
+│   │   ├── config.go            # Runner configuration
+│   │   └── manager.go           # High-level VM operations
+│   ├── cloudinit/               # Cloud-init configuration
+│   │   └── config.go            # User data generation
+│   ├── github/                  # GitHub App integration
+│   │   └── app.go               # Token generation
+│   ├── health/                  # Health checking
+│   │   └── checker.go           # Auto-recovery
+│   ├── config/                  # Configuration management
+│   │   └── config.go            # JSON config file
+│   └── logging/                 # Logging
+│       └── logger.go            # Level-based logging
 ```
 
 ## CLI Commands
@@ -56,6 +66,22 @@ go build -o gh-runner ./cmd/gh-runner
 ./gh-runner stop [name]
 ./gh-runner destroy [name]
 ./gh-runner wait [name]  # Wait for IP
+
+# Health checking
+./gh-runner health  # Check all runner health
+
+# With GitHub App integration
+./gh-runner create runner-1 \
+  --org sovereignignite \
+  --app-id 12345 \
+  --private-key /path/to/key.pem \
+  --cloud-init
+
+# With config file
+./gh-runner --config /path/to/config.json create runner-1
+
+# With logging
+./gh-runner --log-level debug create runner-1
 ```
 
 ## VM Configuration
