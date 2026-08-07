@@ -86,8 +86,8 @@ go build -o gh-runner ./cmd/gh-runner
 
 ## VM Configuration
 
-- **Network**: NAT (192.168.122.0/24), DHCP .100-.254
-- **Storage**: `/var/lib/libvirt/images/gh-runners/`
+- **Network**: Uses existing `default` network (must be active)
+- **Storage**: Uses existing `default` pool (`/home/me/.local/share/libvirt/images/`)
 - **Base image**: Ubuntu 24.04 cloud image (auto-downloaded)
 - **Default VM**: 4GB RAM, 2 CPUs, 20GB disk
 - **Ephemeral**: Clone-on-create, discard on destroy
