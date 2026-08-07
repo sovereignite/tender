@@ -58,6 +58,9 @@ func (c *Client) CreateDomain(cfg DomainConfig) error {
 		VCPU: &libvirtxml.DomainVCPU{
 			Value: cfg.CPUs,
 		},
+		CPU: &libvirtxml.DomainCPU{
+			Mode: "host-model",
+		},
 		OS: &libvirtxml.DomainOS{
 			Type: &libvirtxml.DomainOSType{
 				Arch:    "x86_64",
