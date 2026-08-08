@@ -127,3 +127,28 @@ func TestImageCacheNameRejectsInvalidMetadata(t *testing.T) {
 		})
 	}
 }
+
+func TestRunnerToolsCacheName(t *testing.T) {
+	name, err := runnerToolsCacheName(images.RunnerRelease{
+		Version: "2.327.1",
+		URL:     "https://github.com/actions/runner/releases/download/v2.327.1/actions-runner-linux-x64-2.327.1.tar.gz",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name != "actions-runner-2.327.1-linux-x64.iso" {
+		t.Fatalf("runner tools cache name is %q", name)
+	}
+}
+
+func TestRunnerToolsCacheNameRejectsInvalidRelease(t *testing.T) {
+	for _, release := range []images.RunnerRelease{
+		{Version: "../runner", URL: "https://github.com/actions/runner.tar.gz"},
+		{Version: "2.327.1", URL: "http://github.com/actions/runner.tar.gz"},
+		{Version: "2.327.1", URL: "https://example.com/actions/runner.tar.gz"},
+	} {
+		if _, err := runnerToolsCacheName(release); err == nil {
+			t.Fatalf("runnerToolsCacheName(%+v) succeeded", release)
+		}
+	}
+}

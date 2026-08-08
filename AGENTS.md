@@ -89,6 +89,7 @@ go build -o gh-runner ./cmd/gh-runner
 - **Network**: Uses existing `default` network (must be active)
 - **Storage**: Uses existing `default` pool (`/home/me/.local/share/libvirt/images/`)
 - **Base image**: Ubuntu 24.04 cloud image (auto-downloaded)
+- **Runner tools**: Versioned `GH_RUNNER_TOOLS` ISO cached in the shared images pool and attached read-only to every VM
 - **Default VM**: 4GB RAM, 2 CPUs, 20GB disk
 - **Ephemeral**: Clone-on-create, discard on destroy
 
@@ -105,10 +106,11 @@ Runner readiness uses virtio-vsock, not HTTP or the libvirt network:
 
 1. `gh-runner create` opens an `AF_VSOCK` listener on a dynamically assigned port before defining or starting the VM.
 2. The generated cloud-init seed contains that vsock port and a standalone `/usr/local/libexec/gh-runner-phone-home.py` callback program.
-3. Cloud-init installs and starts the GitHub Actions runner service.
-4. The callback connects to host CID `2` and sends newline-delimited JSON containing `instance_id`, `hostname`, `fqdn`, `pub_key_rsa`, `pub_key_ecdsa`, and `pub_key_ed25519`.
-5. The Go listener records the guest CID and metadata, replies `OK`, and marks the matching runner ready.
-6. The `create` command exits successfully only after receiving that acknowledged callback.
+3. The VM mounts the shared `GH_RUNNER_TOOLS` ISO and extracts the cached runner archive into its writable root disk.
+4. Cloud-init configures and starts the GitHub Actions runner service without downloading runner binaries.
+5. The callback connects to host CID `2` and sends newline-delimited JSON containing `instance_id`, `hostname`, `fqdn`, `pub_key_rsa`, `pub_key_ecdsa`, and `pub_key_ed25519`.
+6. The Go listener records the guest CID and metadata, replies `OK`, and marks the matching runner ready.
+7. The `create` command exits successfully only after receiving that acknowledged callback.
 
 Do not replace this path with a callback to the libvirt gateway. Vsock deliberately avoids dependency on guest IP assignment, routing, NAT, DNS, or host firewall configuration.
 

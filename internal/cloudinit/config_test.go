@@ -36,6 +36,8 @@ func TestGenerateUserDataUsesVsockPhoneHome(t *testing.T) {
 		`"pub_key_ecdsa"`,
 		`"pub_key_ed25519"`,
 		"gh-runner-phone-home.py \"runner\" 12345",
+		"mount -o ro LABEL=GH_RUNNER_TOOLS /mnt/gh-runner-tools",
+		"tar xzf /mnt/gh-runner-tools/actions-runner.tar.gz",
 	} {
 		if !strings.Contains(userData, expected) {
 			t.Errorf("generated user data does not contain %q", expected)
@@ -43,6 +45,9 @@ func TestGenerateUserDataUsesVsockPhoneHome(t *testing.T) {
 	}
 	if strings.Contains(userData, "phone_home:") || strings.Contains(userData, "http://") {
 		t.Fatal("generated user data still contains HTTP phone-home configuration")
+	}
+	if strings.Contains(userData, "api.github.com/repos/actions/runner") || strings.Contains(userData, "actions-runner-linux-x64") {
+		t.Fatal("generated user data still downloads the runner")
 	}
 }
 

@@ -26,6 +26,7 @@ type DomainConfig struct {
 	CPUs        uint
 	DiskPath    string
 	SeedPath    string
+	ToolsPath   string
 	NetworkName string
 }
 
@@ -109,6 +110,18 @@ func (c *Client) CreateDomain(cfg DomainConfig) error {
 			},
 			Target:   &libvirtxml.DomainDiskTarget{Dev: "sda", Bus: "sata"},
 			ReadOnly: &libvirtxml.DomainDiskReadOnly{},
+		})
+	}
+	if cfg.ToolsPath != "" {
+		domain.Devices.Disks = append(domain.Devices.Disks, libvirtxml.DomainDisk{
+			Device: "cdrom",
+			Driver: &libvirtxml.DomainDiskDriver{Name: "qemu", Type: "raw"},
+			Source: &libvirtxml.DomainDiskSource{
+				File: &libvirtxml.DomainDiskSourceFile{File: cfg.ToolsPath},
+			},
+			Target:    &libvirtxml.DomainDiskTarget{Dev: "sdb", Bus: "sata"},
+			ReadOnly:  &libvirtxml.DomainDiskReadOnly{},
+			Shareable: &libvirtxml.DomainDiskShareable{},
 		})
 	}
 

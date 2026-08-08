@@ -57,6 +57,7 @@
               shellcheck
               tpm2-pkcs11
               tpm2-tools
+              xorriso
 
               yamllint
 

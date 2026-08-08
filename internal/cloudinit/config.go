@@ -109,11 +109,10 @@ runcmd:
   - |
     set -eux
     install -d -o {{ .Username }} -g {{ .Username }} /opt/actions-runner
+    install -d /mnt/gh-runner-tools
+    mount -o ro LABEL=GH_RUNNER_TOOLS /mnt/gh-runner-tools
     cd /opt/actions-runner
-    runner_version="$(curl -fsSL https://api.github.com/repos/actions/runner/releases/latest | jq -r '.tag_name | ltrimstr("v")')"
-    curl -fsSLo actions-runner.tar.gz "https://github.com/actions/runner/releases/download/v${runner_version}/actions-runner-linux-x64-${runner_version}.tar.gz"
-    tar xzf actions-runner.tar.gz
-    rm actions-runner.tar.gz
+    tar xzf /mnt/gh-runner-tools/actions-runner.tar.gz
     chown -R {{ .Username }}:{{ .Username }} /opt/actions-runner
     sudo -u {{ .Username }} ./config.sh --url https://github.com/{{ .Organization }} --token {{ .Token }} --name {{ .RunnerName }}{{ if .Labels }} --labels {{ joinLabels .Labels }}{{ end }}{{ if .Group }} --runnergroup {{ .Group }}{{ end }} --work _work --replace --unattended --ephemeral
     ./svc.sh install {{ .Username }}

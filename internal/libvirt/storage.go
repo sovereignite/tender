@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -310,6 +312,128 @@ func (c *Client) CreateSeedVolume(name string, seed []byte) (string, error) {
 		return "", fmt.Errorf("failed to get seed volume path: %w", err)
 	}
 	return path, nil
+}
+
+// CacheRunnerTools builds and caches a read-only ISO containing the runner archive.
+func (c *Client) CacheRunnerTools(release images.RunnerRelease) (string, error) {
+	cacheName, err := runnerToolsCacheName(release)
+	if err != nil {
+		return "", err
+	}
+	pool, err := c.l.StoragePoolLookupByName(imagesPoolName)
+	if err != nil {
+		return "", fmt.Errorf("pool %q not found: %w", imagesPoolName, err)
+	}
+	if volume, err := c.l.StorageVolLookupByName(pool, cacheName); err == nil {
+		return c.l.StorageVolGetPath(volume)
+	} else if !isLibvirtError(err, libvirt.ErrNoStorageVol) {
+		return "", fmt.Errorf("failed to look up runner tools image %q: %w", cacheName, err)
+	}
+
+	dir, err := os.MkdirTemp("", "gh-runner-tools-")
+	if err != nil {
+		return "", fmt.Errorf("failed to create runner tools workspace: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+
+	archivePath := filepath.Join(dir, "actions-runner.tar.gz")
+	if err := downloadFile(release.URL, archivePath); err != nil {
+		return "", fmt.Errorf("failed to download GitHub Actions runner %s: %w", release.Version, err)
+	}
+	isoPath := filepath.Join(dir, cacheName)
+	output, err := exec.Command(
+		"xorriso", "-as", "mkisofs", "-quiet",
+		"-R",
+		"-V", "GH_RUNNER_TOOLS",
+		"-o", isoPath,
+		"-graft-points", "actions-runner.tar.gz="+archivePath,
+	).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("xorriso failed: %w: %s", err, bytes.TrimSpace(output))
+	}
+
+	iso, err := os.Open(isoPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to open runner tools ISO: %w", err)
+	}
+	defer func() { _ = iso.Close() }()
+	info, err := iso.Stat()
+	if err != nil {
+		return "", fmt.Errorf("failed to inspect runner tools ISO: %w", err)
+	}
+
+	volumeDef := libvirtxml.StorageVolume{
+		Name: cacheName,
+		Capacity: &libvirtxml.StorageVolumeSize{
+			Value: uint64(info.Size()),
+			Unit:  "bytes",
+		},
+		Allocation: &libvirtxml.StorageVolumeSize{
+			Value: uint64(info.Size()),
+			Unit:  "bytes",
+		},
+		Target: &libvirtxml.StorageVolumeTarget{
+			Format: &libvirtxml.StorageVolumeTargetFormat{Type: "raw"},
+		},
+	}
+	volumeXML, err := volumeDef.Marshal()
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal runner tools volume XML: %w", err)
+	}
+	volume, err := c.l.StorageVolCreateXML(pool, volumeXML, 0)
+	if err != nil {
+		return "", fmt.Errorf("failed to create runner tools volume: %w", err)
+	}
+	keepVolume := false
+	defer func() {
+		if !keepVolume {
+			_ = c.l.StorageVolDelete(volume, 0)
+		}
+	}()
+	if err := c.l.StorageVolUpload(volume, iso, 0, uint64(info.Size()), 0); err != nil {
+		return "", fmt.Errorf("failed to upload runner tools ISO: %w", err)
+	}
+	path, err := c.l.StorageVolGetPath(volume)
+	if err != nil {
+		return "", fmt.Errorf("failed to get runner tools ISO path: %w", err)
+	}
+	keepVolume = true
+	return path, nil
+}
+
+func runnerToolsCacheName(release images.RunnerRelease) (string, error) {
+	if release.Version == "" || filepath.Base(release.Version) != release.Version || release.Version == "." {
+		return "", fmt.Errorf("invalid GitHub Actions runner version %q", release.Version)
+	}
+	parsedURL, err := url.Parse(release.URL)
+	if err != nil || parsedURL.Scheme != "https" || parsedURL.Host != "github.com" {
+		return "", fmt.Errorf("runner download URL must use https://github.com")
+	}
+	return fmt.Sprintf("actions-runner-%s-linux-x64.iso", release.Version), nil
+}
+
+func downloadFile(sourceURL, destination string) error {
+	request, err := http.NewRequest(http.MethodGet, sourceURL, nil)
+	if err != nil {
+		return err
+	}
+	response, err := (&http.Client{Timeout: 30 * time.Minute}).Do(request)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("download returned %s", response.Status)
+	}
+	file, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(file, response.Body); err != nil {
+		_ = file.Close()
+		return err
+	}
+	return file.Close()
 }
 
 // CacheImage downloads and verifies an image on first use.

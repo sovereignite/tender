@@ -34,6 +34,7 @@ type Manager struct {
 	client    *libvirt.Client
 	phoneHome *phoneHomeServer
 	baseImage string
+	toolsPath string
 }
 
 func NewManager(client *libvirt.Client) *Manager {
@@ -140,6 +141,16 @@ func (m *Manager) EnsureInfrastructure() error {
 	}
 	m.baseImage = baseImage
 
+	runnerRelease, err := images.LatestRunnerRelease()
+	if err != nil {
+		return fmt.Errorf("failed to select GitHub Actions runner release: %w", err)
+	}
+	toolsPath, err := m.client.CacheRunnerTools(runnerRelease)
+	if err != nil {
+		return fmt.Errorf("failed to cache GitHub Actions runner tools: %w", err)
+	}
+	m.toolsPath = toolsPath
+
 	return nil
 }
 
@@ -156,6 +167,9 @@ func (m *Manager) create(cfg Config, seedPath string) error {
 	if m.baseImage == "" {
 		return fmt.Errorf("runner infrastructure is not initialized")
 	}
+	if m.toolsPath == "" {
+		return fmt.Errorf("runner tools are not initialized")
+	}
 	diskPath, err := m.client.CloneVolume(diskName, m.baseImage)
 	if err != nil {
 		return fmt.Errorf("failed to clone volume: %w", err)
@@ -167,6 +181,7 @@ func (m *Manager) create(cfg Config, seedPath string) error {
 		CPUs:        cfg.CPUs,
 		DiskPath:    diskPath,
 		SeedPath:    seedPath,
+		ToolsPath:   m.toolsPath,
 		NetworkName: cfg.NetworkName,
 	}
 
