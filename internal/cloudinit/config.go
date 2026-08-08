@@ -3,6 +3,9 @@ package cloudinit
 import (
 	"bytes"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"text/template"
 )
 
@@ -53,53 +56,28 @@ users:
     sudo: ALL=(ALL) NOPASSWD:ALL
     shell: /bin/bash
     lock_passwd: true
-    ssh_import_id: gh:{{ .Username }}
+    ssh_import_id:
+      - gh:{{ .Username }}
 
 packages:
   - curl
   - tar
   - jq
   - unzip
-  - systemd
 
 runcmd:
-  - mkdir -p /opt/actions-runner
-  - cd /opt/actions-runner
-  - curl -L -o actions-runner-linux-x64.tar.gz https://github.com/actions/runner/releases/download/v2.319.1/actions-runner-linux-x64-2.319.1.tar.gz
-  - tar xzf actions-runner-linux-x64.tar.gz
-  - rm actions-runner-linux-x64.tar.gz
-  - chown -R {{ .Username }}:{{ .Username }} /opt/actions-runner
-  - ./config.sh --url https://github.com/{{ .Organization }} --token {{ .Token }} --name {{ .RunnerName }} --labels {{ joinLabels .Labels }} --runnergroup {{ .Group }} --work _work --replace --unattended
-  - ./svc.sh install {{ .Username }}
-  - ./svc.sh start
-
-write_files:
-  - path: /etc/systemd/system/github-runner.service
-    content: |
-      [Unit]
-      Description=GitHub Actions Runner
-      After=network.target
-
-      [Service]
-      Type=simple
-      User={{ .Username }}
-      WorkingDirectory=/opt/actions-runner
-      ExecStart=/opt/actions-runner/run.sh
-      Restart=always
-      RestartSec=0
-
-      [Install]
-      WantedBy=multi-user.target
-
-  - path: /etc/netplan/01-netcfg.yaml
-    content: |
-      network:
-        version: 2
-        ethernets:
-          ens3:
-            dhcp4: true
-            nameservers:
-              addresses: [{{ joinDNS .DNS }}]
+  - |
+    set -eux
+    install -d -o {{ .Username }} -g {{ .Username }} /opt/actions-runner
+    cd /opt/actions-runner
+    runner_version="$(curl -fsSL https://api.github.com/repos/actions/runner/releases/latest | jq -r '.tag_name | ltrimstr("v")')"
+    curl -fsSLo actions-runner.tar.gz "https://github.com/actions/runner/releases/download/v${runner_version}/actions-runner-linux-x64-${runner_version}.tar.gz"
+    tar xzf actions-runner.tar.gz
+    rm actions-runner.tar.gz
+    chown -R {{ .Username }}:{{ .Username }} /opt/actions-runner
+    sudo -u {{ .Username }} ./config.sh --url https://github.com/{{ .Organization }} --token {{ .Token }} --name {{ .RunnerName }} --labels {{ joinLabels .Labels }} --runnergroup {{ .Group }} --work _work --replace --unattended --ephemeral
+    ./svc.sh install {{ .Username }}
+    ./svc.sh start
 
 final_message: "GitHub Actions runner {{ .RunnerName }} is ready!"
 
@@ -148,4 +126,33 @@ func GenerateMetaConfig(cfg Config) string {
 	return fmt.Sprintf(`instance-id: %s
 local-hostname: %s
 `, cfg.RunnerName, cfg.Hostname)
+}
+
+// BuildSeedImage creates a NoCloud seed disk and returns its bytes.
+func BuildSeedImage(userData, metaData string) ([]byte, error) {
+	dir, err := os.MkdirTemp("", "gh-runner-seed-")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create seed workspace: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+
+	userDataPath := filepath.Join(dir, "user-data")
+	metaDataPath := filepath.Join(dir, "meta-data")
+	seedPath := filepath.Join(dir, "seed.img")
+	if err := os.WriteFile(userDataPath, []byte(userData), 0600); err != nil {
+		return nil, fmt.Errorf("failed to write user-data: %w", err)
+	}
+	if err := os.WriteFile(metaDataPath, []byte(metaData), 0600); err != nil {
+		return nil, fmt.Errorf("failed to write meta-data: %w", err)
+	}
+
+	output, err := exec.Command("cloud-localds", seedPath, userDataPath, metaDataPath).CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("cloud-localds failed: %w: %s", err, bytes.TrimSpace(output))
+	}
+	seed, err := os.ReadFile(seedPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read seed image: %w", err)
+	}
+	return seed, nil
 }

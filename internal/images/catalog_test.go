@@ -24,6 +24,52 @@ func TestCompareVersions(t *testing.T) {
 	}
 }
 
+func TestSelectImageDefaultsToLatestSupportedUbuntu(t *testing.T) {
+	t.Parallel()
+	selected, err := selectImage([]Image{
+		{Distro: "ubuntu", Release: "27.04", Arch: "x86_64", Format: "qcow2", Supported: false, Name: "unsupported"},
+		{Distro: "ubuntu", Release: "26.04", BuildID: "20260801", Arch: "x86_64", Format: "qcow2", Supported: true, Name: "latest"},
+		{Distro: "ubuntu", Release: "24.04", BuildID: "20260807", Arch: "x86_64", Format: "qcow2", Supported: true, Name: "older"},
+		{Distro: "debian", Release: "13", Arch: "x86_64", Format: "qcow2", Supported: true, Name: "other-distro"},
+	}, Selector{Arch: "amd64"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected.Name != "latest" {
+		t.Fatalf("selected %q", selected.Name)
+	}
+}
+
+func TestSelectImageAcceptsPartialOverrides(t *testing.T) {
+	t.Parallel()
+	candidates := []Image{
+		{Distro: "debian", Release: "13", Codename: "Trixie", BuildID: "20260803-2559", Arch: "x86_64", Format: "qcow2", Supported: true, Name: "trixie"},
+		{Distro: "debian", Release: "12", Codename: "Bookworm", BuildID: "20260806-2562", Arch: "x86_64", Format: "qcow2", Supported: true, Name: "bookworm"},
+	}
+	selected, err := selectImage(candidates, Selector{Distro: "debian", Release: "bookworm", Arch: "x86_64"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected.Name != "bookworm" {
+		t.Fatalf("selected %q", selected.Name)
+	}
+}
+
+func TestSelectImageUsesLatestBuildDeterministically(t *testing.T) {
+	t.Parallel()
+	candidates := []Image{
+		{Distro: "ubuntu", Release: "26.04", BuildID: "20260731", Arch: "x86_64", Format: "qcow2", Supported: true, Name: "old"},
+		{Distro: "ubuntu", Release: "26.04", BuildID: "20260801", Arch: "x86_64", Format: "qcow2", Supported: true, Name: "new"},
+	}
+	selected, err := selectImage(candidates, Selector{Arch: "x86_64", Format: "qcow2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected.Name != "new" {
+		t.Fatalf("selected %q", selected.Name)
+	}
+}
+
 func TestParseUbuntu(t *testing.T) {
 	t.Parallel()
 	catalog := ubuntuCatalog{Products: map[string]ubuntuProduct{

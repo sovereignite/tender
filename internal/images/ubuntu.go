@@ -109,7 +109,7 @@ func parseUbuntu(catalog ubuntuCatalog, releaseDates map[string]time.Time) []Ima
 			BuildID:      build,
 			BuildDate:    buildDate,
 			Arch:         normalizeArch(product.Arch),
-			Format:       item.FType,
+			Format:       "qcow2",
 			Name:         path.Base(item.Path),
 			URL:          "https://cloud-images.ubuntu.com/" + strings.TrimPrefix(item.Path, "/"),
 			Checksum:     item.SHA256,

@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"strconv"
 	"time"
 
@@ -71,7 +70,6 @@ func main() {
 		},
 	}
 
-	var count int
 	var labels []string
 	var memory uint
 	var cpus uint
@@ -80,16 +78,13 @@ func main() {
 	var appID int64
 	var privateKeyPath string
 	var group string
-	var cloudInit bool
 	var token string
 	var configFile string
 	var logLevel string
 	var username string
-	var poolName string
 
 	rootCmd.PersistentFlags().StringVar(&configFile, "config", "", "Config file path")
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "Log level (debug, info, warn, error)")
-	rootCmd.PersistentFlags().StringVar(&poolName, "pool", "default", "Storage pool name")
 
 	createCmd := &cobra.Command{
 		Use:   "create",
@@ -113,56 +108,53 @@ func main() {
 					return fmt.Errorf("failed to create GitHub App: %w", err)
 				}
 			}
-
-			var mgr *runner.Manager
+			var tokenProvider github.TokenProvider
 			if ghApp != nil {
-				mgr = runner.NewManagerWithGitHub(client, ghApp)
+				tokenProvider = ghApp
 			} else {
-				mgr = runner.NewManager(client)
+				tokenProvider = github.NewCLI(org)
 			}
+			if token == "" {
+				registration, err := tokenProvider.GetRunnerRegistrationToken()
+				if err != nil {
+					return err
+				}
+				token = registration.Token
+			}
+			mgr := runner.NewManager(client)
 
-			if err := mgr.EnsureInfrastructure(poolName); err != nil {
+			if err := mgr.EnsureInfrastructure(); err != nil {
 				return err
 			}
 
-			for i := 0; i < count; i++ {
-				cfg := runner.DefaultConfig()
-				cfg.Organization = org
-				cfg.Repository = repo
-				cfg.Username = username
-				cfg.PoolName = poolName
-				cfg.Labels = labels
-				cfg.MemoryMB = memory
-				cfg.CPUs = cpus
-				cfg.Group = group
+			cfg := runner.DefaultConfig()
+			cfg.Organization = org
+			cfg.Repository = repo
+			cfg.Username = username
+			cfg.Labels = labels
+			cfg.MemoryMB = memory
+			cfg.CPUs = cpus
+			cfg.Group = group
 
-				if cloudInit {
-					if err := mgr.CreateWithCloudInit(cfg, token); err != nil {
-						return err
-					}
-				} else {
-					if err := mgr.Create(cfg); err != nil {
-						return err
-					}
-				}
-
-				if err := mgr.Start(cfg.Name); err != nil {
-					return err
-				}
-
-				logger.Info("Created: %s, waiting for phone-home...", cfg.Name)
-				ph, err := mgr.WaitForPhoneHome(cfg.Name, 5*time.Minute)
-				if err != nil {
-					return fmt.Errorf("VM started but never phoned home: %w", err)
-				}
-				logger.Info("Ready: %s (%s)", cfg.Name, ph.IP)
+			if err := mgr.CreateWithCloudInit(cfg, token); err != nil {
+				return err
 			}
+
+			if err := mgr.Start(cfg.Name); err != nil {
+				return err
+			}
+
+			logger.Info("Created: %s, waiting for phone-home...", cfg.Name)
+			ph, err := mgr.WaitForPhoneHome(cfg.Name, 15*time.Minute)
+			if err != nil {
+				return fmt.Errorf("VM started but never phoned home: %w", err)
+			}
+			logger.Info("Ready: %s (%s)", cfg.Name, ph.IP)
 
 			return nil
 		},
 	}
 
-	createCmd.Flags().IntVarP(&count, "count", "n", 1, "Number of VMs to create")
 	createCmd.Flags().StringSliceVarP(&labels, "labels", "l", []string{"self-hosted", "linux", "x64"}, "Runner labels")
 	createCmd.Flags().UintVarP(&memory, "memory", "m", 4096, "Memory in MB")
 	createCmd.Flags().UintVarP(&cpus, "cpus", "c", 2, "Number of CPUs")
@@ -171,7 +163,6 @@ func main() {
 	createCmd.Flags().Int64Var(&appID, "app-id", 0, "GitHub App ID")
 	createCmd.Flags().StringVar(&privateKeyPath, "private-key", "", "Path to GitHub App private key")
 	createCmd.Flags().StringVarP(&group, "group", "g", "default", "Runner group")
-	createCmd.Flags().BoolVar(&cloudInit, "cloud-init", false, "Use cloud-init for runner installation")
 	createCmd.Flags().StringVar(&token, "token", "", "GitHub runner registration token")
 	createCmd.Flags().StringVarP(&username, "username", "u", os.Getenv("GH_USERNAME"), "GitHub username for SSH key import")
 
@@ -297,6 +288,12 @@ func main() {
 			if status.IP != "" {
 				fmt.Printf("IP: %s\n", status.IP)
 			}
+			disk, err := mgr.DiskInfo(args[0])
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Disk capacity: %d MiB\n", disk.Capacity/(1024*1024))
+			fmt.Printf("Disk allocation: %d MiB\n", disk.Allocation/(1024*1024))
 
 			return nil
 		},
@@ -365,11 +362,12 @@ func main() {
 		Short: "Open a serial console to a runner VM",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c := exec.Command("virsh", "-c", "qemu:///system", "console", args[0])
-			c.Stdin = os.Stdin
-			c.Stdout = os.Stdout
-			c.Stderr = os.Stderr
-			return c.Run()
+			client, err := libvirt.NewClient()
+			if err != nil {
+				return err
+			}
+			defer func() { _ = client.Close() }()
+			return runner.NewManager(client).Console(args[0], os.Stdout)
 		},
 	}
 
@@ -438,7 +436,38 @@ func main() {
 	imagesListCmd.Flags().BoolP("lts", "l", false, "Only show LTS releases")
 	imagesListCmd.Flags().StringP("arch", "a", "amd64", "Architecture (amd64, arm64)")
 
-	imagesCmd.AddCommand(imagesListCmd)
+	imagesSelectCmd := &cobra.Command{
+		Use:   "select [distro]",
+		Short: "Select one supported cloud image",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			distro := ""
+			if len(args) == 1 {
+				distro = args[0]
+			}
+			release, _ := cmd.Flags().GetString("release")
+			arch, _ := cmd.Flags().GetString("arch")
+			format, _ := cmd.Flags().GetString("format")
+			lts, _ := cmd.Flags().GetBool("lts")
+			image, err := images.SelectImage(images.Selector{
+				Distro: distro, Release: release, Arch: arch, Format: format, LTS: lts,
+			})
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Distro: %s\nRelease: %s\nCodename: %s\nArchitecture: %s\nSupport: %s\nReleased: %s\nBuilt: %s\nFormat: %s\nSize: %s\nImage: %s\nURL: %s\nChecksum: %s:%s\n",
+				image.Distro, image.Release, image.Codename, image.Arch, image.Support,
+				imageDate(image.ReleaseDate), imageDate(image.BuildDate), image.Format,
+				imageSize(image.Size), image.Name, image.URL, image.ChecksumType, image.Checksum)
+			return nil
+		},
+	}
+	imagesSelectCmd.Flags().StringP("release", "r", "", "Release version or codename")
+	imagesSelectCmd.Flags().StringP("arch", "a", "", "Architecture (defaults to host architecture)")
+	imagesSelectCmd.Flags().StringP("format", "f", "", "Image format")
+	imagesSelectCmd.Flags().BoolP("lts", "l", false, "Require an LTS release")
+
+	imagesCmd.AddCommand(imagesListCmd, imagesSelectCmd)
 
 	rootCmd.AddCommand(createCmd, startCmd, stopCmd, destroyCmd, listCmd, statusCmd, waitCmd, healthCmd, consoleCmd, dumpxmlCmd, imagesCmd)
 

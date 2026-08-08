@@ -2,17 +2,30 @@ package libvirt
 
 import (
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/digitalocean/go-libvirt"
 	"github.com/libvirt/libvirt-go-xml"
 )
 
+func (c *Client) OpenConsole(name string, output io.Writer) error {
+	domain, err := c.l.DomainLookupByName(name)
+	if err != nil {
+		return fmt.Errorf("domain not found: %w", err)
+	}
+	if err := c.l.DomainOpenConsole(domain, nil, output, uint32(libvirt.DomainConsoleForce)); err != nil {
+		return fmt.Errorf("failed to open domain console: %w", err)
+	}
+	return nil
+}
+
 type DomainConfig struct {
 	Name        string
 	MemoryMB    uint
 	CPUs        uint
 	DiskPath    string
+	SeedPath    string
 	NetworkName string
 }
 
@@ -86,6 +99,17 @@ func (c *Client) CreateDomain(cfg DomainConfig) error {
 				Model: libvirtxml.DomainVideoModel{Type: "virtio"},
 			}},
 		},
+	}
+	if cfg.SeedPath != "" {
+		domain.Devices.Disks = append(domain.Devices.Disks, libvirtxml.DomainDisk{
+			Device: "cdrom",
+			Driver: &libvirtxml.DomainDiskDriver{Name: "qemu", Type: "raw"},
+			Source: &libvirtxml.DomainDiskSource{
+				File: &libvirtxml.DomainDiskSourceFile{File: cfg.SeedPath},
+			},
+			Target:   &libvirtxml.DomainDiskTarget{Dev: "sda", Bus: "sata"},
+			ReadOnly: &libvirtxml.DomainDiskReadOnly{},
+		})
 	}
 
 	xml, err := domain.Marshal()

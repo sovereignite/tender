@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -44,6 +45,14 @@ type Filter struct {
 	Release string
 	LTS     bool
 	Arch    string
+}
+
+type Selector struct {
+	Distro  string
+	Release string
+	Arch    string
+	Format  string
+	LTS     bool
 }
 
 func ListImages(filter Filter) ([]Image, error) {
@@ -94,22 +103,75 @@ func listImages(ctx context.Context, client *http.Client, filter Filter) ([]Imag
 		if result[i].Distro != result[j].Distro {
 			return result[i].Distro < result[j].Distro
 		}
-		return compareVersions(result[i].Release, result[j].Release) > 0
+		if comparison := compareVersions(result[i].Release, result[j].Release); comparison != 0 {
+			return comparison > 0
+		}
+		if comparison := compareVersions(result[i].BuildID, result[j].BuildID); comparison != 0 {
+			return comparison > 0
+		}
+		return result[i].Name < result[j].Name
 	})
 	return result, nil
 }
 
-func GetLatestLTS() (*Image, error) {
-	images, err := ListImages(Filter{Distro: "ubuntu", LTS: true, Arch: "x86_64"})
+func SelectImage(selector Selector) (*Image, error) {
+	selector = selector.defaults()
+	images, err := ListImages(Filter{
+		Distro:  selector.Distro,
+		Release: selector.Release,
+		LTS:     selector.LTS,
+		Arch:    selector.Arch,
+	})
 	if err != nil {
 		return nil, err
 	}
-	for i := range images {
-		if images[i].Supported {
-			return &images[i], nil
+	return selectImage(images, selector)
+}
+
+func selectImage(candidates []Image, selector Selector) (*Image, error) {
+	selector = selector.defaults()
+	var matches []Image
+	for _, image := range candidates {
+		if !image.Supported || image.Distro != selector.Distro || image.Arch != selector.Arch {
+			continue
 		}
+		if selector.Release != "" && !strings.EqualFold(image.Release, selector.Release) && !strings.EqualFold(image.Codename, selector.Release) {
+			continue
+		}
+		if selector.Format != "" && !strings.EqualFold(image.Format, selector.Format) {
+			continue
+		}
+		if selector.LTS && !image.IsLTS {
+			continue
+		}
+		matches = append(matches, image)
 	}
-	return nil, fmt.Errorf("no supported Ubuntu LTS image found")
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("no supported image matches distro=%s release=%s arch=%s format=%s lts=%t", selector.Distro, selector.Release, selector.Arch, selector.Format, selector.LTS)
+	}
+	sort.Slice(matches, func(i, j int) bool {
+		if comparison := compareVersions(matches[i].Release, matches[j].Release); comparison != 0 {
+			return comparison > 0
+		}
+		if comparison := compareVersions(matches[i].BuildID, matches[j].BuildID); comparison != 0 {
+			return comparison > 0
+		}
+		return matches[i].Name < matches[j].Name
+	})
+	return &matches[0], nil
+}
+
+func (selector Selector) defaults() Selector {
+	selector.Distro = strings.ToLower(strings.TrimSpace(selector.Distro))
+	if selector.Distro == "" {
+		selector.Distro = "ubuntu"
+	}
+	selector.Arch = normalizeArch(selector.Arch)
+	if selector.Arch == "" {
+		selector.Arch = normalizeArch(runtime.GOARCH)
+	}
+	selector.Format = strings.ToLower(strings.TrimSpace(selector.Format))
+	return selector
 }
 
 func compareVersions(a, b string) int {

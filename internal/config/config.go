@@ -36,8 +36,6 @@ type GitHubConfig struct {
 type LibvirtConfig struct {
 	URI         string `json:"uri"`
 	NetworkName string `json:"network_name"`
-	PoolName    string `json:"pool_name"`
-	PoolPath    string `json:"pool_path"`
 }
 
 // RunnerConfig holds default runner configuration.
@@ -68,8 +66,6 @@ func DefaultConfig() Config {
 		Libvirt: LibvirtConfig{
 			URI:         "qemu:///system",
 			NetworkName: "gh-runners",
-			PoolName:    "gh-runners",
-			PoolPath:    "/var/lib/libvirt/images/gh-runners",
 		},
 		Runner: RunnerConfig{
 			Labels:   []string{"self-hosted", "linux", "x64"},

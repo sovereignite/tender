@@ -1,48 +1,70 @@
 package libvirt
 
 import (
-	"encoding/xml"
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"os"
+	"net/url"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/digitalocean/go-libvirt"
 	"github.com/libvirt/libvirt-go-xml"
+	"github.com/sovereignite/gh-workers/internal/images"
 )
 
 const (
-	BaseImageName = "ubuntu-26.04-server-cloudimg-amd64.img"
-	BaseImageURL  = "https://cloud-images.ubuntu.com/releases/26.04/release/" + BaseImageName
+	runnerPoolName     = "default"
+	imagesPoolName     = "images"
+	runnerDiskCapacity = 20 * 1024 * 1024 * 1024
 )
 
-// StorageConfig holds the storage pool configuration.
-type StorageConfig struct {
-	Name string
-	Path string
+type VolumeInfo struct {
+	Capacity   uint64
+	Allocation uint64
 }
 
-// CreatePool creates a storage pool for the runner VMs.
-func (c *Client) CreatePool(cfg StorageConfig) error {
-	// Create pool XML - let libvirt set the path automatically
-	poolXML := fmt.Sprintf(`<pool type='dir'>
-  <name>%s</name>
-</pool>`, cfg.Name)
+// EnsureImagesPool creates and starts the singleton base-image pool.
+func (c *Client) EnsureImagesPool() error {
+	if err := c.ensurePoolReady(runnerPoolName); err != nil {
+		return fmt.Errorf("runner storage pool is not ready: %w", err)
+	}
 
-	_, err := c.l.StoragePoolDefineXML(poolXML, 0)
+	exists, err := c.poolExists(imagesPoolName)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return c.ensurePoolReady(imagesPoolName)
+	}
+
+	reference, err := c.l.StoragePoolLookupByName(runnerPoolName)
+	if err != nil {
+		return fmt.Errorf("reference pool %q not found: %w", runnerPoolName, err)
+	}
+
+	referenceXML, err := c.l.StoragePoolGetXMLDesc(reference, 0)
+	if err != nil {
+		return fmt.Errorf("failed to get reference pool %q XML: %w", runnerPoolName, err)
+	}
+
+	poolXML, err := derivedPoolXML(referenceXML, imagesPoolName)
+	if err != nil {
+		return fmt.Errorf("failed to derive pool %q from %q: %w", imagesPoolName, runnerPoolName, err)
+	}
+
+	pool, err := c.l.StoragePoolDefineXML(poolXML, 0)
 	if err != nil {
 		return fmt.Errorf("failed to define pool: %w", err)
 	}
 
-	// Get the pool to start it
-	pool, err := c.l.StoragePoolLookupByName(cfg.Name)
-	if err != nil {
-		return fmt.Errorf("failed to lookup pool: %w", err)
-	}
-
-	if err := c.l.StoragePoolCreate(pool, 0); err != nil {
+	if err := c.l.StoragePoolCreate(pool, libvirt.StoragePoolCreateWithBuild); err != nil {
+		_ = c.l.StoragePoolUndefine(pool)
 		return fmt.Errorf("failed to start pool: %w", err)
 	}
 
@@ -54,17 +76,101 @@ func (c *Client) CreatePool(cfg StorageConfig) error {
 	return nil
 }
 
-// PoolExists checks if a storage pool exists.
-func (c *Client) PoolExists(name string) bool {
+func (c *Client) ensurePoolReady(name string) error {
+	pool, err := c.l.StoragePoolLookupByName(name)
+	if err != nil {
+		return fmt.Errorf("pool %q not found: %w", name, err)
+	}
+
+	poolXML, err := c.l.StoragePoolGetXMLDesc(pool, 0)
+	if err != nil {
+		return fmt.Errorf("failed to get pool %q XML: %w", name, err)
+	}
+	if _, err := dirPoolDefinition(poolXML); err != nil {
+		return fmt.Errorf("invalid pool %q: %w", name, err)
+	}
+
+	active, err := c.l.StoragePoolIsActive(pool)
+	if err != nil {
+		return fmt.Errorf("failed to check whether pool %q is active: %w", name, err)
+	}
+	if active == 0 {
+		if err := c.l.StoragePoolCreate(pool, 0); err != nil {
+			return fmt.Errorf("failed to start pool %q: %w", name, err)
+		}
+	}
+
+	autostart, err := c.l.StoragePoolGetAutostart(pool)
+	if err != nil {
+		return fmt.Errorf("failed to get pool %q autostart: %w", name, err)
+	}
+	if autostart == 0 {
+		if err := c.l.StoragePoolSetAutostart(pool, 1); err != nil {
+			return fmt.Errorf("failed to set pool %q autostart: %w", name, err)
+		}
+	}
+
+	return nil
+}
+
+func derivedPoolXML(referenceXML, name string) (string, error) {
+	if name == "" || filepath.Base(name) != name || name == "." {
+		return "", fmt.Errorf("invalid pool name %q", name)
+	}
+
+	reference, err := dirPoolDefinition(referenceXML)
+	if err != nil {
+		return "", err
+	}
+
+	referencePath := filepath.Clean(reference.Target.Path)
+	targetPath := filepath.Join(filepath.Dir(referencePath), "gh-workers-"+name)
+
+	definition := libvirtxml.StoragePool{
+		Type: "dir",
+		Name: name,
+		Target: &libvirtxml.StoragePoolTarget{
+			Path: targetPath,
+		},
+	}
+	return definition.Marshal()
+}
+
+func dirPoolDefinition(poolXML string) (*libvirtxml.StoragePool, error) {
+	var definition libvirtxml.StoragePool
+	if err := definition.Unmarshal(poolXML); err != nil {
+		return nil, fmt.Errorf("failed to parse pool XML: %w", err)
+	}
+	if definition.Type != "dir" {
+		return nil, fmt.Errorf("expected type dir, got %q", definition.Type)
+	}
+	if definition.Target == nil || definition.Target.Path == "" {
+		return nil, fmt.Errorf("directory pool has no target path")
+	}
+	if !filepath.IsAbs(definition.Target.Path) {
+		return nil, fmt.Errorf("directory pool target %q is not absolute", definition.Target.Path)
+	}
+	return &definition, nil
+}
+
+func (c *Client) poolExists(name string) (bool, error) {
 	_, err := c.l.StoragePoolLookupByName(name)
-	return err == nil
+	if err == nil {
+		return true, nil
+	}
+
+	var libvirtErr libvirt.Error
+	if errors.As(err, &libvirtErr) && libvirtErr.Code == uint32(libvirt.ErrNoStoragePool) {
+		return false, nil
+	}
+	return false, fmt.Errorf("failed to look up pool %q: %w", name, err)
 }
 
 // CloneVolume creates a new volume by cloning from the base image.
-func (c *Client) CloneVolume(poolName, name string) (string, error) {
-	pool, err := c.l.StoragePoolLookupByName(poolName)
+func (c *Client) CloneVolume(name, baseImageName string) (string, error) {
+	pool, err := c.l.StoragePoolLookupByName(runnerPoolName)
 	if err != nil {
-		return "", fmt.Errorf("pool %q not found: %w", poolName, err)
+		return "", fmt.Errorf("pool %q not found: %w", runnerPoolName, err)
 	}
 
 	// Delete existing volume if it exists
@@ -73,37 +179,22 @@ func (c *Client) CloneVolume(poolName, name string) (string, error) {
 		_ = c.l.StorageVolDelete(existingVol, 0)
 	}
 
-	// Get base image from images pool - find the first .img file
-	imagesPool, err := c.l.StoragePoolLookupByName("images")
+	imagesPool, err := c.l.StoragePoolLookupByName(imagesPoolName)
 	if err != nil {
 		return "", fmt.Errorf("images pool not found: %w", err)
 	}
 
-	// List volumes in images pool to find the base image
-	vols, _, err := c.l.StoragePoolListAllVolumes(imagesPool, 0, 0)
+	baseVol, err := c.l.StorageVolLookupByName(imagesPool, baseImageName)
 	if err != nil {
-		return "", fmt.Errorf("failed to list images pool volumes: %w", err)
-	}
-
-	var baseVol libvirt.StorageVol
-	for _, vol := range vols {
-		volType, _, _, err := c.l.StorageVolGetInfo(vol)
-		if err == nil && volType == 0 { // 0 = file volume
-			baseVol = vol
-			break
-		}
-	}
-
-	if baseVol.Name == "" {
-		return "", fmt.Errorf("no base image found in images pool")
+		return "", fmt.Errorf("base image %q not found in images pool: %w", baseImageName, err)
 	}
 
 	// Clone from base image - let libvirt determine the path from the pool
 	newVol := libvirtxml.StorageVolume{
 		Name: name,
 		Capacity: &libvirtxml.StorageVolumeSize{
-			Value: 20,
-			Unit:  "GiB",
+			Value: runnerDiskCapacity,
+			Unit:  "bytes",
 		},
 		Target: &libvirtxml.StorageVolumeTarget{
 			Format: &libvirtxml.StorageVolumeTargetFormat{
@@ -121,6 +212,10 @@ func (c *Client) CloneVolume(poolName, name string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to clone volume: %w", err)
 	}
+	if err := c.l.StorageVolResize(vol, runnerDiskCapacity, 0); err != nil {
+		_ = c.l.StorageVolDelete(vol, 0)
+		return "", fmt.Errorf("failed to expand cloned volume: %w", err)
+	}
 
 	// Get the actual path from libvirt
 	volPath, err := c.l.StorageVolGetPath(vol)
@@ -132,14 +227,17 @@ func (c *Client) CloneVolume(poolName, name string) (string, error) {
 }
 
 // DeleteVolume deletes a volume.
-func (c *Client) DeleteVolume(poolName, name string) error {
-	pool, err := c.l.StoragePoolLookupByName(poolName)
+func (c *Client) DeleteVolume(name string) error {
+	pool, err := c.l.StoragePoolLookupByName(runnerPoolName)
 	if err != nil {
 		return fmt.Errorf("pool not found: %w", err)
 	}
 
 	vol, err := c.l.StorageVolLookupByName(pool, name)
 	if err != nil {
+		if isLibvirtError(err, libvirt.ErrNoStorageVol) {
+			return nil
+		}
 		return fmt.Errorf("volume not found: %w", err)
 	}
 
@@ -150,72 +248,183 @@ func (c *Client) DeleteVolume(poolName, name string) error {
 	return nil
 }
 
-// DownloadBaseImage downloads the Ubuntu cloud image to the storage pool.
-func (c *Client) DownloadBaseImage(poolName string, image string) error {
-	pool, err := c.l.StoragePoolLookupByName(poolName)
+func (c *Client) GetVolumeInfo(name string) (*VolumeInfo, error) {
+	pool, err := c.l.StoragePoolLookupByName(runnerPoolName)
 	if err != nil {
-		return fmt.Errorf("pool %q not found: %w", poolName, err)
+		return nil, fmt.Errorf("pool %q not found: %w", runnerPoolName, err)
 	}
-
-	// Use provided image or default
-	imageName := BaseImageName
-	imageURL := BaseImageURL
-	if image != "" {
-		imageName = image
-		imageURL = "https://cloud-images.ubuntu.com/releases/" + strings.TrimSuffix(image, "-server-cloudimg-amd64.img") + "/release/" + image
-	}
-
-	// Check if base image already exists
-	_, err = c.l.StorageVolLookupByName(pool, imageName)
-	if err == nil {
-		return nil // Already exists
-	}
-
-	// Get the pool's target path from its XML
-	poolXML, err := c.l.StoragePoolGetXMLDesc(pool, 0)
+	volume, err := c.l.StorageVolLookupByName(pool, name)
 	if err != nil {
-		return fmt.Errorf("failed to get pool XML: %w", err)
+		return nil, fmt.Errorf("volume %q not found: %w", name, err)
 	}
-
-	var poolDef struct {
-		Target struct {
-			Path string `xml:"path"`
-		} `xml:"target"`
+	_, capacity, allocation, err := c.l.StorageVolGetInfo(volume)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get volume %q info: %w", name, err)
 	}
-	if err := xml.Unmarshal([]byte(poolXML), &poolDef); err != nil {
-		return fmt.Errorf("failed to parse pool XML: %w", err)
-	}
-
-	imagePath := filepath.Join(poolDef.Target.Path, imageName)
-	if err := downloadFile(imageURL, imagePath); err != nil {
-		return fmt.Errorf("failed to download base image: %w", err)
-	}
-
-	// Refresh pool to pick up the new file
-	if err := c.l.StoragePoolRefresh(pool, 0); err != nil {
-		return fmt.Errorf("failed to refresh pool: %w", err)
-	}
-
-	return nil
+	return &VolumeInfo{Capacity: capacity, Allocation: allocation}, nil
 }
 
-func downloadFile(url, path string) error {
-	resp, err := http.Get(url)
+// CreateSeedVolume stores a cloud-init seed in the runner storage pool.
+func (c *Client) CreateSeedVolume(name string, seed []byte) (string, error) {
+	pool, err := c.l.StoragePoolLookupByName(runnerPoolName)
 	if err != nil {
-		return err
+		return "", fmt.Errorf("pool %q not found: %w", runnerPoolName, err)
 	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download failed with status: %s", resp.Status)
+	if existing, err := c.l.StorageVolLookupByName(pool, name); err == nil {
+		if err := c.l.StorageVolDelete(existing, 0); err != nil {
+			return "", fmt.Errorf("failed to replace seed volume: %w", err)
+		}
+	} else if !isLibvirtError(err, libvirt.ErrNoStorageVol) {
+		return "", fmt.Errorf("failed to look up seed volume: %w", err)
 	}
 
-	out, err := os.Create(path)
+	volumeDef := libvirtxml.StorageVolume{
+		Name: name,
+		Capacity: &libvirtxml.StorageVolumeSize{
+			Value: uint64(len(seed)),
+			Unit:  "bytes",
+		},
+		Allocation: &libvirtxml.StorageVolumeSize{
+			Value: uint64(len(seed)),
+			Unit:  "bytes",
+		},
+		Target: &libvirtxml.StorageVolumeTarget{
+			Format: &libvirtxml.StorageVolumeTargetFormat{Type: "raw"},
+		},
+	}
+	volumeXML, err := volumeDef.Marshal()
 	if err != nil {
-		return err
+		return "", fmt.Errorf("failed to marshal seed volume XML: %w", err)
 	}
-	defer func() { _ = out.Close() }()
+	volume, err := c.l.StorageVolCreateXML(pool, volumeXML, 0)
+	if err != nil {
+		return "", fmt.Errorf("failed to create seed volume: %w", err)
+	}
+	if err := c.l.StorageVolUpload(volume, bytes.NewReader(seed), 0, uint64(len(seed)), 0); err != nil {
+		_ = c.l.StorageVolDelete(volume, 0)
+		return "", fmt.Errorf("failed to stream seed into libvirt volume: %w", err)
+	}
+	path, err := c.l.StorageVolGetPath(volume)
+	if err != nil {
+		_ = c.l.StorageVolDelete(volume, 0)
+		return "", fmt.Errorf("failed to get seed volume path: %w", err)
+	}
+	return path, nil
+}
 
-	_, err = io.Copy(out, resp.Body)
-	return err
+// CacheImage downloads and verifies an image on first use.
+func (c *Client) CacheImage(image images.Image) (string, error) {
+	cacheName, err := imageCacheName(image)
+	if err != nil {
+		return "", err
+	}
+
+	pool, err := c.l.StoragePoolLookupByName(imagesPoolName)
+	if err != nil {
+		return "", fmt.Errorf("pool %q not found: %w", imagesPoolName, err)
+	}
+
+	_, err = c.l.StorageVolLookupByName(pool, cacheName)
+	if err == nil {
+		return cacheName, nil
+	}
+	if !isLibvirtError(err, libvirt.ErrNoStorageVol) {
+		return "", fmt.Errorf("failed to look up cached image %q: %w", cacheName, err)
+	}
+
+	request, err := http.NewRequest(http.MethodGet, image.URL, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create image request: %w", err)
+	}
+	response, err := (&http.Client{Timeout: 30 * time.Minute}).Do(request)
+	if err != nil {
+		return "", fmt.Errorf("failed to download image: %w", err)
+	}
+	defer func() { _ = response.Body.Close() }()
+
+	if response.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("image download returned %s", response.Status)
+	}
+	if response.ContentLength >= 0 && uint64(response.ContentLength) != image.Size {
+		return "", fmt.Errorf("image size is %d bytes, expected %d", response.ContentLength, image.Size)
+	}
+
+	volumeDef := libvirtxml.StorageVolume{
+		Name: cacheName,
+		Capacity: &libvirtxml.StorageVolumeSize{
+			Value: image.Size,
+			Unit:  "bytes",
+		},
+		Allocation: &libvirtxml.StorageVolumeSize{
+			Value: 0,
+			Unit:  "bytes",
+		},
+		Target: &libvirtxml.StorageVolumeTarget{
+			Format: &libvirtxml.StorageVolumeTargetFormat{Type: "raw"},
+		},
+	}
+	volumeXML, err := volumeDef.Marshal()
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal image volume XML: %w", err)
+	}
+	volume, err := c.l.StorageVolCreateXML(pool, volumeXML, 0)
+	if err != nil {
+		return "", fmt.Errorf("failed to create image volume: %w", err)
+	}
+	keepVolume := false
+	defer func() {
+		if !keepVolume {
+			_ = c.l.StorageVolDelete(volume, 0)
+		}
+	}()
+
+	hash := sha256.New()
+	reader := io.TeeReader(response.Body, hash)
+	if err := c.l.StorageVolUpload(volume, reader, 0, image.Size, 0); err != nil {
+		return "", fmt.Errorf("failed to stream image into libvirt volume: %w", err)
+	}
+	if _, err := io.Copy(io.Discard, reader); err != nil {
+		return "", fmt.Errorf("failed to finish reading image: %w", err)
+	}
+	actualChecksum := hex.EncodeToString(hash.Sum(nil))
+	if !strings.EqualFold(actualChecksum, image.Checksum) {
+		return "", fmt.Errorf("image checksum is %s, expected %s", actualChecksum, image.Checksum)
+	}
+
+	if err := c.l.StoragePoolRefresh(pool, 0); err != nil {
+		return "", fmt.Errorf("failed to refresh images pool: %w", err)
+	}
+
+	keepVolume = true
+	return cacheName, nil
+}
+
+func imageCacheName(image images.Image) (string, error) {
+	parsedURL, err := url.Parse(image.URL)
+	if err != nil {
+		return "", fmt.Errorf("invalid image URL: %w", err)
+	}
+	if parsedURL.Scheme != "https" || parsedURL.Host == "" {
+		return "", fmt.Errorf("image URL must use HTTPS")
+	}
+	if image.Name == "" || filepath.Base(image.Name) != image.Name {
+		return "", fmt.Errorf("invalid image name %q", image.Name)
+	}
+	if !strings.EqualFold(image.ChecksumType, "sha256") {
+		return "", fmt.Errorf("unsupported image checksum type %q", image.ChecksumType)
+	}
+	checksum, err := hex.DecodeString(image.Checksum)
+	if err != nil || len(checksum) != sha256.Size {
+		return "", fmt.Errorf("invalid SHA-256 checksum")
+	}
+	if image.Size == 0 {
+		return "", fmt.Errorf("image size is missing")
+	}
+	return hex.EncodeToString(checksum[:8]) + "-" + image.Name, nil
+
+}
+
+func isLibvirtError(err error, code libvirt.ErrorNumber) bool {
+	var libvirtErr libvirt.Error
+	return errors.As(err, &libvirtErr) && libvirtErr.Code == uint32(code)
 }

@@ -18,8 +18,6 @@ type Config struct {
 	CPUs     uint
 
 	NetworkName string
-	PoolName    string
-	Image       string
 }
 
 func DefaultConfig() Config {
@@ -29,7 +27,6 @@ func DefaultConfig() Config {
 		MemoryMB:    4096,
 		CPUs:        2,
 		NetworkName: "default",
-		PoolName:    "default",
 	}
 }
 

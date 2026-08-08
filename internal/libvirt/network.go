@@ -2,6 +2,9 @@ package libvirt
 
 import (
 	"fmt"
+	"net"
+
+	libvirtxml "github.com/libvirt/libvirt-go-xml"
 )
 
 const (
@@ -19,6 +22,32 @@ type NetworkConfig struct {
 	Gateway   string
 	DHCPStart string
 	DHCPEnd   string
+}
+
+// NetworkGateway returns the IPv4 gateway advertised by a libvirt network.
+func (c *Client) NetworkGateway(name string) (string, error) {
+	network, err := c.l.NetworkLookupByName(name)
+	if err != nil {
+		return "", fmt.Errorf("network %q not found: %w", name, err)
+	}
+	networkXML, err := c.l.NetworkGetXMLDesc(network, 0)
+	if err != nil {
+		return "", fmt.Errorf("failed to get network %q XML: %w", name, err)
+	}
+	return networkGateway(networkXML)
+}
+
+func networkGateway(networkXML string) (string, error) {
+	var definition libvirtxml.Network
+	if err := definition.Unmarshal(networkXML); err != nil {
+		return "", fmt.Errorf("failed to parse network XML: %w", err)
+	}
+	for _, ip := range definition.IPs {
+		if parsed := net.ParseIP(ip.Address); parsed != nil && parsed.To4() != nil {
+			return ip.Address, nil
+		}
+	}
+	return "", fmt.Errorf("network has no IPv4 gateway")
 }
 
 // DefaultNetworkConfig returns the default NAT network configuration.

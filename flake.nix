@@ -31,6 +31,7 @@
               btrfs-progs
               bzip2
               cfssl
+              cloud-utils
               codex
               google-chrome
               curl
