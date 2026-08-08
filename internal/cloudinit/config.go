@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"text/template"
+
+	"github.com/sovereignite/gh-workers/internal/isoimage"
 )
 
 // Config holds the cloud-init configuration for a GitHub Actions runner.
@@ -58,47 +59,6 @@ users:
     ssh_import_id:
       - gh:{{ .Username }}
 
-write_files:
-  - path: /usr/local/libexec/gh-runner-phone-home.py
-    owner: root:root
-    permissions: '0755'
-    content: |
-      #!/usr/bin/env python3
-      import json
-      import socket
-      import sys
-      import time
-
-      def read_key(path):
-          try:
-              with open(path, encoding="utf-8") as key:
-                  return key.read()
-          except OSError:
-              return "N/A"
-
-      payload = {
-          "instance_id": sys.argv[1],
-          "hostname": socket.gethostname(),
-          "fqdn": socket.getfqdn(),
-          "pub_key_rsa": read_key("/etc/ssh/ssh_host_rsa_key.pub"),
-          "pub_key_ecdsa": read_key("/etc/ssh/ssh_host_ecdsa_key.pub"),
-          "pub_key_ed25519": read_key("/etc/ssh/ssh_host_ed25519_key.pub"),
-      }
-      message = json.dumps(payload).encode() + b"\n"
-      for attempt in range(10):
-          try:
-              with socket.socket(socket.AF_VSOCK, socket.SOCK_STREAM) as callback:
-                  callback.settimeout(10)
-                  callback.connect((socket.VMADDR_CID_HOST, int(sys.argv[2])))
-                  callback.sendall(message)
-                  if callback.recv(3) != b"OK\n":
-                      raise RuntimeError("invalid phone-home response")
-              break
-          except (OSError, RuntimeError):
-              if attempt == 9:
-                  raise
-              time.sleep(3)
-
 packages:
   - curl
   - tar
@@ -111,13 +71,14 @@ runcmd:
     install -d -o {{ .Username }} -g {{ .Username }} /opt/actions-runner
     install -d /mnt/gh-runner-tools
     mount -o ro LABEL=GH_RUNNER_TOOLS /mnt/gh-runner-tools
+    install -m 0755 /mnt/gh-runner-tools/gh-runner-phone-home /usr/local/libexec/gh-runner-phone-home
     cd /opt/actions-runner
     tar xzf /mnt/gh-runner-tools/actions-runner.tar.gz
     chown -R {{ .Username }}:{{ .Username }} /opt/actions-runner
     sudo -u {{ .Username }} ./config.sh --url https://github.com/{{ .Organization }} --token {{ .Token }} --name {{ .RunnerName }}{{ if .Labels }} --labels {{ joinLabels .Labels }}{{ end }}{{ if .Group }} --runnergroup {{ .Group }}{{ end }} --work _work --replace --unattended --ephemeral
     ./svc.sh install {{ .Username }}
     ./svc.sh start
-    /usr/local/libexec/gh-runner-phone-home.py {{ printf "%q" .RunnerName }} {{ .PhoneHomePort }}
+    /usr/local/libexec/gh-runner-phone-home --instance-id {{ printf "%q" .RunnerName }} --port {{ .PhoneHomePort }}
 
 final_message: "GitHub Actions runner {{ .RunnerName }} is ready!"
 `
@@ -173,7 +134,8 @@ func BuildSeedImage(userData, metaData string) ([]byte, error) {
 
 	userDataPath := filepath.Join(dir, "user-data")
 	metaDataPath := filepath.Join(dir, "meta-data")
-	seedPath := filepath.Join(dir, "seed.img")
+	seedPath := dir + ".img"
+	defer func() { _ = os.Remove(seedPath) }()
 	if err := os.WriteFile(userDataPath, []byte(userData), 0600); err != nil {
 		return nil, fmt.Errorf("failed to write user-data: %w", err)
 	}
@@ -181,9 +143,8 @@ func BuildSeedImage(userData, metaData string) ([]byte, error) {
 		return nil, fmt.Errorf("failed to write meta-data: %w", err)
 	}
 
-	output, err := exec.Command("cloud-localds", seedPath, userDataPath, metaDataPath).CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("cloud-localds failed: %w: %s", err, bytes.TrimSpace(output))
+	if err := isoimage.Build(seedPath, dir, "cidata"); err != nil {
+		return nil, fmt.Errorf("failed to build cloud-init seed: %w", err)
 	}
 	seed, err := os.ReadFile(seedPath)
 	if err != nil {

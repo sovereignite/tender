@@ -1,5 +1,6 @@
 # Binaries (ignore root binary, not cmd directory)
 /gh-runner
+/gh-runner-phone-home
 *.exe
 
 # Go build cache

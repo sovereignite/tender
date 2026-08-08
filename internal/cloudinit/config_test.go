@@ -1,9 +1,14 @@
 package cloudinit
 
 import (
-	"os/exec"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	backendfile "github.com/diskfs/go-diskfs/backend/file"
+	"github.com/diskfs/go-diskfs/filesystem/iso9660"
 )
 
 func TestGenerateUserDataUsesSSHImportArray(t *testing.T) {
@@ -26,16 +31,8 @@ func TestGenerateUserDataUsesVsockPhoneHome(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
-		"path: /usr/local/libexec/gh-runner-phone-home.py",
-		"socket.AF_VSOCK",
-		"socket.VMADDR_CID_HOST",
-		`"instance_id"`,
-		`"hostname"`,
-		`"fqdn"`,
-		`"pub_key_rsa"`,
-		`"pub_key_ecdsa"`,
-		`"pub_key_ed25519"`,
-		"gh-runner-phone-home.py \"runner\" 12345",
+		"install -m 0755 /mnt/gh-runner-tools/gh-runner-phone-home /usr/local/libexec/gh-runner-phone-home",
+		"gh-runner-phone-home --instance-id \"runner\" --port 12345",
 		"mount -o ro LABEL=GH_RUNNER_TOOLS /mnt/gh-runner-tools",
 		"tar xzf /mnt/gh-runner-tools/actions-runner.tar.gz",
 	} {
@@ -52,15 +49,43 @@ func TestGenerateUserDataUsesVsockPhoneHome(t *testing.T) {
 }
 
 func TestBuildSeedImage(t *testing.T) {
-	if _, err := exec.LookPath("cloud-localds"); err != nil {
-		t.Skip("cloud-localds is not installed")
-	}
-
 	seed, err := BuildSeedImage("#cloud-config\nhostname: runner\n", "instance-id: runner\n")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(seed) == 0 {
 		t.Fatal("BuildSeedImage() returned an empty image")
+	}
+	path := filepath.Join(t.TempDir(), "seed.iso")
+	if err := os.WriteFile(path, seed, 0600); err != nil {
+		t.Fatal(err)
+	}
+	image, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = image.Close() }()
+	filesystem, err := iso9660.Read(backendfile.New(image, true), int64(len(seed)), 0, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimRight(filesystem.Label(), "\x00 ") != "cidata" {
+		t.Fatalf("seed label is %q", filesystem.Label())
+	}
+	for name, expected := range map[string]string{
+		"/user-data": "#cloud-config\nhostname: runner\n",
+		"/meta-data": "instance-id: runner\n",
+	} {
+		file, err := filesystem.OpenFile(name, os.O_RDONLY)
+		if err != nil {
+			t.Fatal(err)
+		}
+		contents, err := io.ReadAll(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(contents) != expected {
+			t.Fatalf("%s is %q", name, contents)
+		}
 	}
 }

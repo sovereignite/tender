@@ -3,6 +3,7 @@ package libvirt
 import (
 	"bytes"
 	"crypto/sha256"
+	"debug/elf"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -10,7 +11,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -18,6 +18,7 @@ import (
 	"github.com/digitalocean/go-libvirt"
 	"github.com/libvirt/libvirt-go-xml"
 	"github.com/sovereignite/gh-workers/internal/images"
+	"github.com/sovereignite/gh-workers/internal/isoimage"
 )
 
 const (
@@ -315,8 +316,12 @@ func (c *Client) CreateSeedVolume(name string, seed []byte) (string, error) {
 }
 
 // CacheRunnerTools builds and caches a read-only ISO containing the runner archive.
-func (c *Client) CacheRunnerTools(release images.RunnerRelease) (string, error) {
-	cacheName, err := runnerToolsCacheName(release)
+func (c *Client) CacheRunnerTools(release images.RunnerRelease, callbackPath string) (string, error) {
+	callbackHash, err := validateCallbackBinary(callbackPath)
+	if err != nil {
+		return "", err
+	}
+	cacheName, err := runnerToolsCacheName(release, callbackHash)
 	if err != nil {
 		return "", err
 	}
@@ -336,20 +341,20 @@ func (c *Client) CacheRunnerTools(release images.RunnerRelease) (string, error) 
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
 
-	archivePath := filepath.Join(dir, "actions-runner.tar.gz")
+	workspace := filepath.Join(dir, "root")
+	if err := os.Mkdir(workspace, 0700); err != nil {
+		return "", fmt.Errorf("failed to create runner tools root: %w", err)
+	}
+	archivePath := filepath.Join(workspace, "actions-runner.tar.gz")
 	if err := downloadFile(release.URL, archivePath); err != nil {
 		return "", fmt.Errorf("failed to download GitHub Actions runner %s: %w", release.Version, err)
 	}
+	if err := copyFile(callbackPath, filepath.Join(workspace, "gh-runner-phone-home"), 0755); err != nil {
+		return "", fmt.Errorf("failed to stage phone-home binary: %w", err)
+	}
 	isoPath := filepath.Join(dir, cacheName)
-	output, err := exec.Command(
-		"xorriso", "-as", "mkisofs", "-quiet",
-		"-R",
-		"-V", "GH_RUNNER_TOOLS",
-		"-o", isoPath,
-		"-graft-points", "actions-runner.tar.gz="+archivePath,
-	).CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("xorriso failed: %w: %s", err, bytes.TrimSpace(output))
+	if err := isoimage.Build(isoPath, workspace, "GH_RUNNER_TOOLS"); err != nil {
+		return "", fmt.Errorf("failed to build runner tools ISO: %w", err)
 	}
 
 	iso, err := os.Open(isoPath)
@@ -401,7 +406,7 @@ func (c *Client) CacheRunnerTools(release images.RunnerRelease) (string, error) 
 	return path, nil
 }
 
-func runnerToolsCacheName(release images.RunnerRelease) (string, error) {
+func runnerToolsCacheName(release images.RunnerRelease, callbackHash []byte) (string, error) {
 	if release.Version == "" || filepath.Base(release.Version) != release.Version || release.Version == "." {
 		return "", fmt.Errorf("invalid GitHub Actions runner version %q", release.Version)
 	}
@@ -409,7 +414,51 @@ func runnerToolsCacheName(release images.RunnerRelease) (string, error) {
 	if err != nil || parsedURL.Scheme != "https" || parsedURL.Host != "github.com" {
 		return "", fmt.Errorf("runner download URL must use https://github.com")
 	}
-	return fmt.Sprintf("actions-runner-%s-linux-x64.iso", release.Version), nil
+	if len(callbackHash) != sha256.Size {
+		return "", fmt.Errorf("invalid phone-home binary SHA-256")
+	}
+	return fmt.Sprintf("actions-runner-%s-%s-linux-x64.iso", release.Version, hex.EncodeToString(callbackHash[:8])), nil
+}
+
+func validateCallbackBinary(path string) ([]byte, error) {
+	binary, err := elf.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open phone-home binary: %w", err)
+	}
+	defer func() { _ = binary.Close() }()
+	if binary.Class != elf.ELFCLASS64 || binary.Machine != elf.EM_X86_64 {
+		return nil, fmt.Errorf("phone-home binary must target Linux x86-64")
+	}
+	if binary.Section(".interp") != nil {
+		return nil, fmt.Errorf("phone-home binary must be statically linked")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open phone-home binary for hashing: %w", err)
+	}
+	defer func() { _ = file.Close() }()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return nil, fmt.Errorf("hash phone-home binary: %w", err)
+	}
+	return hash.Sum(nil), nil
+}
+
+func copyFile(source, destination string, mode os.FileMode) error {
+	input, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = input.Close() }()
+	output, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(output, input); err != nil {
+		_ = output.Close()
+		return err
+	}
+	return output.Close()
 }
 
 func downloadFile(sourceURL, destination string) error {

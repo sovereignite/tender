@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -123,7 +124,11 @@ func main() {
 			}
 			mgr := runner.NewManager(client)
 
-			if err := mgr.EnsureInfrastructure(); err != nil {
+			callbackPath, err := phoneHomeBinaryPath()
+			if err != nil {
+				return err
+			}
+			if err := mgr.EnsureInfrastructure(callbackPath); err != nil {
 				return err
 			}
 
@@ -474,4 +479,16 @@ func main() {
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
+}
+
+func phoneHomeBinaryPath() (string, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("locate gh-runner executable: %w", err)
+	}
+	path := filepath.Join(filepath.Dir(executable), "gh-runner-phone-home")
+	if _, err := os.Stat(path); err != nil {
+		return "", fmt.Errorf("phone-home binary %q is unavailable: %w", path, err)
+	}
+	return path, nil
 }

@@ -4,6 +4,7 @@ go 1.26.5
 
 require (
 	github.com/digitalocean/go-libvirt v0.0.0-20260609165003-6254771e63a8
+	github.com/diskfs/go-diskfs v1.9.4
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/libvirt/libvirt-go-xml v7.4.0+incompatible
 	github.com/mdlayher/vsock v1.3.0
@@ -11,6 +12,7 @@ require (
 )
 
 require (
+	github.com/djherbis/times v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/mdlayher/socket v0.6.0 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect

@@ -105,10 +105,10 @@ VMs use `--ephemeral` runner flag + systemd reboot:
 Runner readiness uses virtio-vsock, not HTTP or the libvirt network:
 
 1. `gh-runner create` opens an `AF_VSOCK` listener on a dynamically assigned port before defining or starting the VM.
-2. The generated cloud-init seed contains that vsock port and a standalone `/usr/local/libexec/gh-runner-phone-home.py` callback program.
+2. The generated cloud-init seed contains that vsock port; both cloud-init and runner-tools ISOs are generated in-process with Go.
 3. The VM mounts the shared `GH_RUNNER_TOOLS` ISO and extracts the cached runner archive into its writable root disk.
 4. Cloud-init configures and starts the GitHub Actions runner service without downloading runner binaries.
-5. The callback connects to host CID `2` and sends newline-delimited JSON containing `instance_id`, `hostname`, `fqdn`, `pub_key_rsa`, `pub_key_ecdsa`, and `pub_key_ed25519`.
+5. The native `gh-runner-phone-home` Go binary connects to host CID `2` and sends newline-delimited JSON containing `instance_id`, `hostname`, `fqdn`, `pub_key_rsa`, `pub_key_ecdsa`, and `pub_key_ed25519`.
 6. The Go listener records the guest CID and metadata, replies `OK`, and marks the matching runner ready.
 7. The `create` command exits successfully only after receiving that acknowledged callback.
 
@@ -126,7 +126,8 @@ nix flake update
 # Check flake evaluates cleanly
 nix flake check
 
-# Build and run
+# Build the host CLI and static Linux guest callback side by side
 go build -o gh-runner ./cmd/gh-runner
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o gh-runner-phone-home ./cmd/gh-runner-phone-home
 ./gh-runner --help
 ```

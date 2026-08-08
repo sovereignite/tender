@@ -11,6 +11,7 @@ import (
 	"github.com/sovereignite/gh-workers/internal/cloudinit"
 	"github.com/sovereignite/gh-workers/internal/images"
 	"github.com/sovereignite/gh-workers/internal/libvirt"
+	"github.com/sovereignite/gh-workers/internal/phonehome"
 )
 
 type PhoneHomeEvent struct {
@@ -93,14 +94,7 @@ func (m *Manager) acceptPhoneHome() {
 		go func() {
 			defer func() { _ = conn.Close() }()
 
-			var payload struct {
-				InstanceID    string `json:"instance_id"`
-				Hostname      string `json:"hostname"`
-				FQDN          string `json:"fqdn"`
-				PubKeyRSA     string `json:"pub_key_rsa"`
-				PubKeyECDSA   string `json:"pub_key_ecdsa"`
-				PubKeyED25519 string `json:"pub_key_ed25519"`
-			}
+			var payload phonehome.Payload
 			if err := json.NewDecoder(conn).Decode(&payload); err != nil || payload.InstanceID == "" {
 				return
 			}
@@ -125,7 +119,7 @@ func (m *Manager) acceptPhoneHome() {
 	}
 }
 
-func (m *Manager) EnsureInfrastructure() error {
+func (m *Manager) EnsureInfrastructure(callbackPath string) error {
 	if err := m.client.EnsureImagesPool(); err != nil {
 		return fmt.Errorf("failed to ensure images pool: %w", err)
 	}
@@ -145,7 +139,7 @@ func (m *Manager) EnsureInfrastructure() error {
 	if err != nil {
 		return fmt.Errorf("failed to select GitHub Actions runner release: %w", err)
 	}
-	toolsPath, err := m.client.CacheRunnerTools(runnerRelease)
+	toolsPath, err := m.client.CacheRunnerTools(runnerRelease, callbackPath)
 	if err != nil {
 		return fmt.Errorf("failed to cache GitHub Actions runner tools: %w", err)
 	}

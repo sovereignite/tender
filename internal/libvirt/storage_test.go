@@ -1,6 +1,7 @@
 package libvirt
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
@@ -132,11 +133,11 @@ func TestRunnerToolsCacheName(t *testing.T) {
 	name, err := runnerToolsCacheName(images.RunnerRelease{
 		Version: "2.327.1",
 		URL:     "https://github.com/actions/runner/releases/download/v2.327.1/actions-runner-linux-x64-2.327.1.tar.gz",
-	})
+	}, bytes.Repeat([]byte{0xab}, 32))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if name != "actions-runner-2.327.1-linux-x64.iso" {
+	if name != "actions-runner-2.327.1-abababababababab-linux-x64.iso" {
 		t.Fatalf("runner tools cache name is %q", name)
 	}
 }
@@ -147,8 +148,14 @@ func TestRunnerToolsCacheNameRejectsInvalidRelease(t *testing.T) {
 		{Version: "2.327.1", URL: "http://github.com/actions/runner.tar.gz"},
 		{Version: "2.327.1", URL: "https://example.com/actions/runner.tar.gz"},
 	} {
-		if _, err := runnerToolsCacheName(release); err == nil {
+		if _, err := runnerToolsCacheName(release, bytes.Repeat([]byte{0xab}, 32)); err == nil {
 			t.Fatalf("runnerToolsCacheName(%+v) succeeded", release)
 		}
+	}
+	if _, err := runnerToolsCacheName(images.RunnerRelease{
+		Version: "2.327.1",
+		URL:     "https://github.com/actions/runner.tar.gz",
+	}, []byte("short")); err == nil {
+		t.Fatal("runnerToolsCacheName() accepted an invalid callback hash")
 	}
 }

@@ -31,7 +31,6 @@
               btrfs-progs
               bzip2
               cfssl
-              cloud-utils
               codex
               google-chrome
               curl
@@ -57,8 +56,6 @@
               shellcheck
               tpm2-pkcs11
               tpm2-tools
-              xorriso
-
               yamllint
 
               # Required by the Kustomize developer agent.
