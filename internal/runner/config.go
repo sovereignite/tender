@@ -23,7 +23,6 @@ type Config struct {
 func DefaultConfig() Config {
 	return Config{
 		Name:        GenerateRunnerName(),
-		Labels:      []string{"self-hosted", "linux", "x64"},
 		MemoryMB:    4096,
 		CPUs:        2,
 		NetworkName: "default",

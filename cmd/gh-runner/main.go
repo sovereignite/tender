@@ -149,20 +149,20 @@ func main() {
 			if err != nil {
 				return fmt.Errorf("VM started but never phoned home: %w", err)
 			}
-			logger.Info("Ready: %s (%s)", cfg.Name, ph.IP)
+			logger.Info("Ready: %s (vsock CID %d)", cfg.Name, ph.CID)
 
 			return nil
 		},
 	}
 
-	createCmd.Flags().StringSliceVarP(&labels, "labels", "l", []string{"self-hosted", "linux", "x64"}, "Runner labels")
+	createCmd.Flags().StringSliceVarP(&labels, "labels", "l", nil, "Runner labels")
 	createCmd.Flags().UintVarP(&memory, "memory", "m", 4096, "Memory in MB")
 	createCmd.Flags().UintVarP(&cpus, "cpus", "c", 2, "Number of CPUs")
 	createCmd.Flags().StringVarP(&org, "org", "o", os.Getenv("GH_RUNNER_ORG"), "GitHub organization")
 	createCmd.Flags().StringVarP(&repo, "repo", "r", "", "GitHub repository")
 	createCmd.Flags().Int64Var(&appID, "app-id", 0, "GitHub App ID")
 	createCmd.Flags().StringVar(&privateKeyPath, "private-key", "", "Path to GitHub App private key")
-	createCmd.Flags().StringVarP(&group, "group", "g", "default", "Runner group")
+	createCmd.Flags().StringVarP(&group, "group", "g", "", "Runner group")
 	createCmd.Flags().StringVar(&token, "token", "", "GitHub runner registration token")
 	createCmd.Flags().StringVarP(&username, "username", "u", os.Getenv("GH_USERNAME"), "GitHub username for SSH key import")
 

@@ -29,7 +29,7 @@ type Config struct {
 	DNS     []string
 
 	// Phone home
-	PhoneHomeURL string
+	PhoneHomePort uint32
 }
 
 // DefaultConfig returns a default cloud-init configuration.
@@ -38,7 +38,6 @@ func DefaultConfig(name, org, token string) Config {
 		RunnerName:   name,
 		Organization: org,
 		Token:        token,
-		Labels:       []string{"self-hosted", "linux", "x64"},
 		Hostname:     name,
 		Username:     "ubuntu",
 		DNS:          []string{"8.8.8.8", "8.8.4.4"},
@@ -59,6 +58,47 @@ users:
     ssh_import_id:
       - gh:{{ .Username }}
 
+write_files:
+  - path: /usr/local/libexec/gh-runner-phone-home.py
+    owner: root:root
+    permissions: '0755'
+    content: |
+      #!/usr/bin/env python3
+      import json
+      import socket
+      import sys
+      import time
+
+      def read_key(path):
+          try:
+              with open(path, encoding="utf-8") as key:
+                  return key.read()
+          except OSError:
+              return "N/A"
+
+      payload = {
+          "instance_id": sys.argv[1],
+          "hostname": socket.gethostname(),
+          "fqdn": socket.getfqdn(),
+          "pub_key_rsa": read_key("/etc/ssh/ssh_host_rsa_key.pub"),
+          "pub_key_ecdsa": read_key("/etc/ssh/ssh_host_ecdsa_key.pub"),
+          "pub_key_ed25519": read_key("/etc/ssh/ssh_host_ed25519_key.pub"),
+      }
+      message = json.dumps(payload).encode() + b"\n"
+      for attempt in range(10):
+          try:
+              with socket.socket(socket.AF_VSOCK, socket.SOCK_STREAM) as callback:
+                  callback.settimeout(10)
+                  callback.connect((socket.VMADDR_CID_HOST, int(sys.argv[2])))
+                  callback.sendall(message)
+                  if callback.recv(3) != b"OK\n":
+                      raise RuntimeError("invalid phone-home response")
+              break
+          except (OSError, RuntimeError):
+              if attempt == 9:
+                  raise
+              time.sleep(3)
+
 packages:
   - curl
   - tar
@@ -75,16 +115,12 @@ runcmd:
     tar xzf actions-runner.tar.gz
     rm actions-runner.tar.gz
     chown -R {{ .Username }}:{{ .Username }} /opt/actions-runner
-    sudo -u {{ .Username }} ./config.sh --url https://github.com/{{ .Organization }} --token {{ .Token }} --name {{ .RunnerName }} --labels {{ joinLabels .Labels }} --runnergroup {{ .Group }} --work _work --replace --unattended --ephemeral
+    sudo -u {{ .Username }} ./config.sh --url https://github.com/{{ .Organization }} --token {{ .Token }} --name {{ .RunnerName }}{{ if .Labels }} --labels {{ joinLabels .Labels }}{{ end }}{{ if .Group }} --runnergroup {{ .Group }}{{ end }} --work _work --replace --unattended --ephemeral
     ./svc.sh install {{ .Username }}
     ./svc.sh start
+    /usr/local/libexec/gh-runner-phone-home.py {{ printf "%q" .RunnerName }} {{ .PhoneHomePort }}
 
 final_message: "GitHub Actions runner {{ .RunnerName }} is ready!"
-
-phone_home:
-  url: {{ .PhoneHomeURL }}
-  post: all
-  tries: 10
 `
 
 	t, err := template.New("cloudinit").Funcs(template.FuncMap{

@@ -1,29 +1,33 @@
 package runner
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
-	"net"
-	"net/http"
 	"sync"
 	"time"
 
+	"github.com/mdlayher/vsock"
 	"github.com/sovereignite/gh-workers/internal/cloudinit"
 	"github.com/sovereignite/gh-workers/internal/images"
 	"github.com/sovereignite/gh-workers/internal/libvirt"
 )
 
 type PhoneHomeEvent struct {
-	IP       string
-	Hostname string
-	Ready    bool
+	CID           uint32
+	Hostname      string
+	FQDN          string
+	PubKeyRSA     string
+	PubKeyECDSA   string
+	PubKeyED25519 string
+	Ready         bool
 }
 
 type phoneHomeServer struct {
 	events map[string]*PhoneHomeEvent
 	mu     sync.RWMutex
-	server *http.Server
-	addr   string
+	server *vsock.Listener
+	port   uint32
 }
 
 type Manager struct {
@@ -39,8 +43,8 @@ func NewManager(client *libvirt.Client) *Manager {
 	}
 }
 
-func (m *Manager) GetPhoneHomeAddress() string {
-	return m.phoneHome.addr
+func (m *Manager) GetPhoneHomePort() uint32 {
+	return m.phoneHome.port
 }
 
 func (m *Manager) WaitForPhoneHome(name string, timeout time.Duration) (*PhoneHomeEvent, error) {
@@ -57,46 +61,67 @@ func (m *Manager) WaitForPhoneHome(name string, timeout time.Duration) (*PhoneHo
 	return nil, fmt.Errorf("timeout waiting for phone home from %s", name)
 }
 
-func (m *Manager) startPhoneHomeServer(networkName string) error {
+func (m *Manager) startPhoneHomeServer() error {
 	if m.phoneHome.server != nil {
 		return nil
 	}
 
-	gateway, err := m.client.NetworkGateway(networkName)
+	listener, err := vsock.Listen(0, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to listen on vsock: %w", err)
 	}
-	listener, err := net.Listen("tcp", net.JoinHostPort(gateway, "0"))
-	if err != nil {
-		return fmt.Errorf("failed to listen: %w", err)
+	addr, ok := listener.Addr().(*vsock.Addr)
+	if !ok {
+		_ = listener.Close()
+		return fmt.Errorf("unexpected vsock listener address %T", listener.Addr())
 	}
-	m.phoneHome.addr = listener.Addr().String()
+	m.phoneHome.server = listener
+	m.phoneHome.port = addr.Port
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/phone-home", func(w http.ResponseWriter, r *http.Request) {
-		instanceID := r.FormValue("instance-id")
-		hostname := r.FormValue("hostname")
-		ip := r.Header.Get("X-Forwarded-For")
-		if ip == "" {
-			ip, _, _ = net.SplitHostPort(r.RemoteAddr)
-		}
-
-		m.phoneHome.mu.Lock()
-		if _, exists := m.phoneHome.events[instanceID]; !exists {
-			m.phoneHome.events[instanceID] = &PhoneHomeEvent{IP: ip}
-		}
-		m.phoneHome.events[instanceID].Hostname = hostname
-		m.phoneHome.events[instanceID].Ready = true
-		m.phoneHome.mu.Unlock()
-
-		_, _ = fmt.Fprintf(w, "OK")
-	})
-
-	m.phoneHome.server = &http.Server{Handler: mux}
-
-	go func() { _ = m.phoneHome.server.Serve(listener) }()
+	go m.acceptPhoneHome()
 
 	return nil
+}
+
+func (m *Manager) acceptPhoneHome() {
+	for {
+		conn, err := m.phoneHome.server.Accept()
+		if err != nil {
+			return
+		}
+		go func() {
+			defer func() { _ = conn.Close() }()
+
+			var payload struct {
+				InstanceID    string `json:"instance_id"`
+				Hostname      string `json:"hostname"`
+				FQDN          string `json:"fqdn"`
+				PubKeyRSA     string `json:"pub_key_rsa"`
+				PubKeyECDSA   string `json:"pub_key_ecdsa"`
+				PubKeyED25519 string `json:"pub_key_ed25519"`
+			}
+			if err := json.NewDecoder(conn).Decode(&payload); err != nil || payload.InstanceID == "" {
+				return
+			}
+
+			var cid uint32
+			if peer, ok := conn.RemoteAddr().(*vsock.Addr); ok {
+				cid = peer.ContextID
+			}
+			m.phoneHome.mu.Lock()
+			m.phoneHome.events[payload.InstanceID] = &PhoneHomeEvent{
+				CID:           cid,
+				Hostname:      payload.Hostname,
+				FQDN:          payload.FQDN,
+				PubKeyRSA:     payload.PubKeyRSA,
+				PubKeyECDSA:   payload.PubKeyECDSA,
+				PubKeyED25519: payload.PubKeyED25519,
+				Ready:         true,
+			}
+			m.phoneHome.mu.Unlock()
+			_, _ = conn.Write([]byte("OK\n"))
+		}()
+	}
 }
 
 func (m *Manager) EnsureInfrastructure() error {
@@ -161,7 +186,7 @@ func (m *Manager) CreateWithCloudInit(cfg Config, token string) error {
 		return fmt.Errorf("runner registration token is required")
 	}
 
-	if err := m.startPhoneHomeServer(cfg.NetworkName); err != nil {
+	if err := m.startPhoneHomeServer(); err != nil {
 		return fmt.Errorf("failed to start phone-home server: %w", err)
 	}
 
@@ -171,7 +196,7 @@ func (m *Manager) CreateWithCloudInit(cfg Config, token string) error {
 	if cfg.Username != "" {
 		cloudCfg.Username = cfg.Username
 	}
-	cloudCfg.PhoneHomeURL = fmt.Sprintf("http://%s/phone-home", m.GetPhoneHomeAddress())
+	cloudCfg.PhoneHomePort = m.GetPhoneHomePort()
 
 	userData, err := cloudinit.GenerateUserData(cloudCfg)
 	if err != nil {

@@ -99,6 +99,19 @@ VMs use `--ephemeral` runner flag + systemd reboot:
 2. systemd restarts runner → re-registers with GitHub
 3. Fresh state for every build
 
+## Runner Readiness: Vsock Phone Home
+
+Runner readiness uses virtio-vsock, not HTTP or the libvirt network:
+
+1. `gh-runner create` opens an `AF_VSOCK` listener on a dynamically assigned port before defining or starting the VM.
+2. The generated cloud-init seed contains that vsock port and a standalone `/usr/local/libexec/gh-runner-phone-home.py` callback program.
+3. Cloud-init installs and starts the GitHub Actions runner service.
+4. The callback connects to host CID `2` and sends newline-delimited JSON containing `instance_id`, `hostname`, `fqdn`, `pub_key_rsa`, `pub_key_ecdsa`, and `pub_key_ed25519`.
+5. The Go listener records the guest CID and metadata, replies `OK`, and marks the matching runner ready.
+6. The `create` command exits successfully only after receiving that acknowledged callback.
+
+Do not replace this path with a callback to the libvirt gateway. Vsock deliberately avoids dependency on guest IP assignment, routing, NAT, DNS, or host firewall configuration.
+
 ## Commands
 
 ```bash
