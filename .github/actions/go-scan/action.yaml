@@ -1,0 +1,51 @@
+name: 'Go Scan'
+description: 'Scan Go binary for vulnerabilities via SBOM'
+inputs:
+  target-id:
+    description: 'Stable logical target id used in artifact names'
+    required: true
+  fail-build:
+    description: 'Fail build on vulnerabilities'
+    required: false
+    default: 'true'
+outputs:
+  sarif:
+    description: 'Path to SARIF report'
+    value: ${{ steps.scan.outputs.sarif }}
+runs:
+  using: "composite"
+  steps:
+    - name: "Download binary"
+      uses: actions/download-artifact@v7
+      with:
+        name: binary-${{ inputs.target-id }}
+        path: /tmp/binary/
+
+    - name: "Generate SBOM"
+      id: sbom
+      uses: anchore/sbom-action@v0
+      with:
+        path: /tmp/binary/
+        format: spdx-json
+        output-file: sbom.spdx.json
+
+    - name: "Scan SBOM"
+      id: scan
+      uses: anchore/scan-action@v7
+      with:
+        sbom: sbom.spdx.json
+        fail-build: ${{ inputs.fail-build }}
+        output-format: sarif
+
+    - name: "Upload SARIF to GitHub"
+      if: always()
+      uses: github/codeql-action/upload-sarif@v4
+      with:
+        sarif_file: ${{ steps.scan.outputs.sarif }}
+
+    - name: "Upload SARIF artifact"
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: scan-sarif-${{ inputs.target-id }}
+        path: ${{ steps.scan.outputs.sarif }}

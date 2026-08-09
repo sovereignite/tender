@@ -1,0 +1,24 @@
+name: Go Sign
+
+on:
+  workflow_call:
+    inputs:
+      target-id:
+        description: 'Stable logical target id used in artifact names'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  sign:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: "Sign"
+        uses: ./.github/actions/go-sign
+        with:
+          target-id: ${{ inputs.target-id }}

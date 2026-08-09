@@ -1,0 +1,201 @@
+name: CI
+
+on:
+  push:
+    branches: [master, 'feature/**']
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ startsWith(github.ref, 'refs/heads/feature/') }}
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+  artifact-metadata: write
+  security-events: write
+  issues: write
+
+jobs:
+  discover-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      changed-files: ${{ steps.discover.outputs.changed-files }}
+      full-build: ${{ steps.discover.outputs.full-build }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: "Discover changes"
+        id: discover
+        uses: ./.github/actions/discover-changes
+        with:
+          base-sha: ${{ github.event.before }}
+          head-sha: ${{ github.sha }}
+          base-ref: master
+          use-branch-base: ${{ github.ref != 'refs/heads/master' }}
+
+  discover-go:
+    needs: discover-changes
+    runs-on: ubuntu-latest
+    outputs:
+      commands: ${{ steps.discover.outputs.commands }}
+      has-targets: ${{ steps.discover.outputs.has-targets }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: "Discover"
+        id: discover
+        uses: ./.github/actions/discover-go-commands
+        with:
+          changed-files: ${{ needs.discover-changes.outputs.changed-files }}
+          full-build: ${{ needs.discover-changes.outputs.full-build }}
+
+  # ─── LINT ────────────────────────────────────────────────────────────
+  lint-go:
+    if: needs.discover-go.outputs.has-targets == 'true'
+    needs: discover-go
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        command: ${{ fromJson(needs.discover-go.outputs.commands) }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: "Lint"
+        uses: ./.github/actions/lint
+        with:
+          paths: ./cmd/${{ matrix.command }}/...
+
+  # ─── TEST ────────────────────────────────────────────────────────────
+  test-go:
+    if: needs.discover-go.outputs.has-targets == 'true'
+    needs: [lint-go, discover-go]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        command: ${{ fromJson(needs.discover-go.outputs.commands) }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: "Test"
+        uses: ./.github/actions/test
+        with:
+          paths: ./cmd/${{ matrix.command }}/...
+          report-name: test-report-go-${{ matrix.command }}
+
+  quality-gate:
+    if: always()
+    needs: [discover-go, test-go]
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Require all test matrices to pass"
+        if: >-
+          ${{
+            needs.discover-go.result != 'success' ||
+            (needs.discover-go.outputs.has-targets == 'true' && needs.test-go.result != 'success')
+          }}
+        run: |
+          echo "One or more quality matrices did not pass."
+          exit 1
+
+  # ─── BUILD ───────────────────────────────────────────────────────────
+  build-go:
+    if: needs.discover-go.outputs.has-targets == 'true'
+    needs: [quality-gate, discover-go]
+    strategy:
+      fail-fast: true
+      matrix:
+        command: ${{ fromJson(needs.discover-go.outputs.commands) }}
+    uses: ./.github/workflows/go-build.yaml
+    with:
+      import-path: ./cmd/${{ matrix.command }}
+      binary-name: ${{ matrix.command }}
+      target-id: go-${{ matrix.command }}
+
+  build-gate:
+    if: always()
+    needs: [discover-go, build-go]
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Require all build matrices to pass"
+        if: >-
+          ${{
+            needs.discover-go.result != 'success' ||
+            (needs.discover-go.outputs.has-targets == 'true' && needs.build-go.result != 'success')
+          }}
+        run: |
+          echo "One or more builds did not pass."
+          exit 1
+
+  # ─── SCAN ────────────────────────────────────────────────────────────
+  scan-go:
+    if: needs.discover-go.outputs.has-targets == 'true'
+    needs: [build-gate, discover-go]
+    strategy:
+      fail-fast: true
+      matrix:
+        command: ${{ fromJson(needs.discover-go.outputs.commands) }}
+    uses: ./.github/workflows/go-scan.yaml
+    with:
+      target-id: go-${{ matrix.command }}
+
+  scan-gate:
+    if: always()
+    needs: [discover-go, scan-go]
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Require all scan matrices to pass"
+        if: >-
+          ${{
+            needs.discover-go.result != 'success' ||
+            (needs.discover-go.outputs.has-targets == 'true' && needs.scan-go.result != 'success')
+          }}
+        run: |
+          echo "One or more scans did not pass."
+          exit 1
+
+  # ─── SIGN ────────────────────────────────────────────────────────────
+  sign-go:
+    if: needs.discover-go.outputs.has-targets == 'true'
+    needs: [scan-gate, discover-go]
+    strategy:
+      fail-fast: true
+      matrix:
+        command: ${{ fromJson(needs.discover-go.outputs.commands) }}
+    uses: ./.github/workflows/go-sign.yaml
+    with:
+      target-id: go-${{ matrix.command }}
+
+  sign-gate:
+    if: always()
+    needs: [discover-go, sign-go]
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Require all signing matrices to pass"
+        if: >-
+          ${{
+            (needs.discover-go.outputs.has-targets == 'true' && needs.sign-go.result != 'success')
+          }}
+        run: |
+          echo "One or more signings did not pass."
+          exit 1
+
+  # ─── ATTEST ──────────────────────────────────────────────────────────
+  attest-go:
+    if: needs.discover-go.outputs.has-targets == 'true'
+    needs: [sign-gate, discover-go]
+    strategy:
+      fail-fast: true
+      matrix:
+        command: ${{ fromJson(needs.discover-go.outputs.commands) }}
+    uses: ./.github/workflows/go-attest.yaml
+    with:
+      target-id: go-${{ matrix.command }}

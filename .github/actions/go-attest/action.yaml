@@ -1,0 +1,19 @@
+name: 'Go Attest'
+description: 'Attest build provenance for Go binary'
+inputs:
+  target-id:
+    description: 'Stable logical target id used in artifact names'
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - name: "Download binary"
+      uses: actions/download-artifact@v7
+      with:
+        name: binary-${{ inputs.target-id }}
+        path: /tmp/binary/
+
+    - name: "Attest build provenance"
+      uses: actions/attest-build-provenance@v4
+      with:
+        subject-path: /tmp/binary/*

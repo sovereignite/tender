@@ -1,0 +1,26 @@
+name: Go Attest
+
+on:
+  workflow_call:
+    inputs:
+      target-id:
+        description: 'Stable logical target id used in artifact names'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+  artifact-metadata: write
+
+jobs:
+  attest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: "Attest"
+        uses: ./.github/actions/go-attest
+        with:
+          target-id: ${{ inputs.target-id }}

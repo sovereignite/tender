@@ -1,0 +1,55 @@
+name: Go Build
+
+on:
+  workflow_call:
+    inputs:
+      import-path:
+        description: 'Go import path to build'
+        required: true
+        type: string
+      binary-name:
+        description: 'Output binary name'
+        required: true
+        type: string
+      target-id:
+        description: 'Stable logical target id used in artifact names'
+        required: true
+        type: string
+      goos:
+        description: 'Target GOOS'
+        required: false
+        type: string
+        default: 'linux'
+      goarch:
+        description: 'Target GOARCH'
+        required: false
+        type: string
+        default: 'amd64'
+      go-version-file:
+        description: 'Path to go.mod for Go version detection'
+        required: false
+        type: string
+        default: 'go.mod'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      binary: ${{ steps.build.outputs.binary }}
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: "Build"
+        id: build
+        uses: ./.github/actions/go-build
+        with:
+          import-path: ${{ inputs.import-path }}
+          binary-name: ${{ inputs.binary-name }}
+          target-id: ${{ inputs.target-id }}
+          goos: ${{ inputs.goos }}
+          goarch: ${{ inputs.goarch }}
+          go-version-file: ${{ inputs.go-version-file }}
