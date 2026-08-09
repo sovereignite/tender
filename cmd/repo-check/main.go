@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -18,6 +19,8 @@ var forbiddenExtensions = map[string]bool{
 	".key": true, ".o": true, ".p12": true, ".pem": true,
 	".pfx": true, ".so": true, ".tar": true, ".zip": true,
 }
+
+var hostedRunner = regexp.MustCompile(`(?m)^\s*runs-on:\s*['"]?(ubuntu|windows|macos)-`)
 
 func main() {
 	entries, err := indexedFiles()
@@ -108,6 +111,9 @@ func checkFile(entry indexEntry, content []byte) []string {
 	}
 	if entry.mode == "100755" && !bytes.HasPrefix(content, []byte("#!")) {
 		violations = append(violations, "executable file has no shebang")
+	}
+	if strings.HasPrefix(entry.path, ".github/workflows/") && hostedRunner.Match(content) {
+		violations = append(violations, "GitHub-hosted runners are forbidden")
 	}
 	return violations
 }

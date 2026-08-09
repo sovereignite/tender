@@ -1,0 +1,40 @@
+name: Attest
+description: Attest command build provenance
+inputs:
+  name:
+    description: Command name
+    required: true
+  os:
+    description: Target operating system
+    required: false
+    default: linux
+  arch:
+    description: Target architecture
+    required: false
+    default: amd64
+runs:
+  using: "composite"
+  steps:
+    - name: Download signed build
+      uses: actions/download-artifact@v7
+      with:
+        name: ${{ inputs.name }}
+        path: ${{ runner.temp }}/${{ inputs.name }}/
+
+    - name: Attest
+      id: attest
+      uses: actions/attest-build-provenance@v4
+      with:
+        subject-path: ${{ runner.temp }}/${{ inputs.name }}/${{ inputs.name }}-${{ inputs.os }}-${{ inputs.arch }}
+
+    - name: Add attestation
+      run: cp "${{ steps.attest.outputs.bundle-path }}" "${{ runner.temp }}/${{ inputs.name }}/${{ inputs.name }}-${{ inputs.os }}-${{ inputs.arch }}.intoto.jsonl"
+      shell: bash
+
+    - name: Upload attested build
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ inputs.name }}
+        path: ${{ runner.temp }}/${{ inputs.name }}/
+        overwrite: true
+        retention-days: 7

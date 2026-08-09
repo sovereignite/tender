@@ -1,37 +1,37 @@
-name: 'Discover Changes'
+name: Discover changes
 description: 'Compute the changed file set once for matrix discovery'
 inputs:
-  base-sha:
+  base:
     description: 'Previous commit for master change detection'
     required: false
-  head-sha:
+  head:
     description: 'Current commit for change detection'
     required: false
-  base-ref:
+  branch:
     description: 'Base branch used for branch-wide change detection'
     required: false
     default: 'master'
-  use-branch-base:
+  compare:
     description: 'Whether to diff from the base branch merge-base'
     required: false
     default: 'false'
 outputs:
-  changed-files:
+  files:
     description: 'Newline-delimited changed file paths'
-    value: ${{ steps.discover.outputs.changed-files }}
-  full-build:
+    value: ${{ steps.changes.outputs.files }}
+  all:
     description: 'Whether the changed file set is unavailable and all targets are required'
-    value: ${{ steps.discover.outputs.full-build }}
+    value: ${{ steps.changes.outputs.all }}
 runs:
   using: 'composite'
   steps:
-    - name: 'Discover'
-      id: discover
+    - name: Discover changes
+      id: changes
       env:
-        BASE_SHA: ${{ inputs.base-sha }}
-        HEAD_SHA: ${{ inputs.head-sha }}
-        BASE_REF: ${{ inputs.base-ref }}
-        USE_BRANCH_BASE: ${{ inputs.use-branch-base }}
+        BASE_SHA: ${{ inputs.base }}
+        HEAD_SHA: ${{ inputs.head }}
+        BASE_REF: ${{ inputs.branch }}
+        USE_BRANCH_BASE: ${{ inputs.compare }}
       run: |
         base_sha="$BASE_SHA"
         full_build=false
@@ -57,9 +57,9 @@ runs:
         fi
 
         {
-          echo 'changed-files<<EOF'
+          echo 'files<<EOF'
           printf '%s\n' "$changed"
           echo EOF
-          echo "full-build=$full_build"
+          echo "all=$full_build"
         } >> "$GITHUB_OUTPUT"
       shell: bash

@@ -71,8 +71,9 @@ go run ./cmd/repo-check
 ```
 
 The pre-commit configuration runs repository policy checks, `gitleaks`, Go
-tests, and `golangci-lint`. There is currently no repository CI workflow, so do
-not imply that remote checks enforce these locally defined gates.
+tests, and `golangci-lint`. `.github/workflows/ci.yaml` runs change-selected
+command gates on self-hosted runners and publishes direct binaries from version
+tags. Do not imply that CI replaces the broader local checks listed above.
 
 Do not perform destructive libvirt integration tests by default. If a task
 requires one, state which domain, storage pool, volumes, and network may be

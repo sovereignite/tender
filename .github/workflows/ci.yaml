@@ -1,8 +1,9 @@
-name: CI
+name: Continuous integration
 
 on:
   push:
     branches: [master, 'feature/**']
+    tags: ['v*']
   workflow_dispatch:
 
 concurrency:
@@ -11,193 +12,262 @@ concurrency:
 
 permissions:
   contents: read
-  packages: write
-  id-token: write
-  attestations: write
-  artifact-metadata: write
-  security-events: write
-  issues: write
 
 jobs:
-  discover-changes:
+  changes:
+    name: Discover changes
     runs-on: self-hosted
     outputs:
-      changed-files: ${{ steps.discover.outputs.changed-files }}
-      full-build: ${{ steps.discover.outputs.full-build }}
+      files: ${{ steps.changes.outputs.files }}
+      all: ${{ steps.changes.outputs.all }}
     steps:
-      - uses: actions/checkout@v7
+      - name: Check out source
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      - name: "Discover changes"
-        id: discover
-        uses: ./.github/actions/discover-changes
+      - name: Discover changes
+        id: changes
+        uses: ./.github/actions/changes
         with:
-          base-sha: ${{ github.event.before }}
-          head-sha: ${{ github.sha }}
-          base-ref: master
-          use-branch-base: ${{ github.ref != 'refs/heads/master' }}
+          base: ${{ github.event.before }}
+          head: ${{ github.sha }}
+          branch: ${{ github.event.repository.default_branch }}
+          compare: ${{ github.ref_type == 'branch' && github.ref_name != github.event.repository.default_branch }}
 
-  discover-go:
-    needs: discover-changes
+  commands:
+    name: Discover commands
+    needs: changes
     runs-on: self-hosted
     outputs:
-      commands: ${{ steps.discover.outputs.commands }}
-      has-targets: ${{ steps.discover.outputs.has-targets }}
+      commands: ${{ steps.commands.outputs.commands }}
+      found: ${{ steps.commands.outputs.found }}
     steps:
-      - uses: actions/checkout@v7
+      - name: Check out source
+        uses: actions/checkout@v7
         with:
-          fetch-depth: 1
+          persist-credentials: false
 
-      - name: "Discover"
-        id: discover
-        uses: ./.github/actions/discover-go-commands
+      - name: Discover commands
+        id: commands
+        uses: ./.github/actions/commands
         with:
-          changed-files: ${{ needs.discover-changes.outputs.changed-files }}
-          full-build: ${{ needs.discover-changes.outputs.full-build }}
+          files: ${{ needs.changes.outputs.files }}
+          all: ${{ needs.changes.outputs.all }}
 
-  # ─── LINT ────────────────────────────────────────────────────────────
-  lint-go:
-    if: needs.discover-go.outputs.has-targets == 'true'
-    needs: discover-go
+  lint:
+    name: Lint ${{ matrix.command }}
+    if: needs.commands.outputs.found == 'true'
+    needs: commands
     runs-on: self-hosted
     strategy:
       fail-fast: true
       matrix:
-        command: ${{ fromJson(needs.discover-go.outputs.commands) }}
+        command: ${{ fromJson(needs.commands.outputs.commands) }}
     steps:
-      - uses: actions/checkout@v7
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
-      - name: "Lint"
+      - name: Lint
         uses: ./.github/actions/lint
         with:
-          paths: ./cmd/${{ matrix.command }}/...
+          path: ./cmd/${{ matrix.command }}/...
 
-  # ─── TEST ────────────────────────────────────────────────────────────
-  test-go:
-    if: needs.discover-go.outputs.has-targets == 'true'
-    needs: [lint-go, discover-go]
+  test:
+    name: Test ${{ matrix.command }}
+    if: needs.commands.outputs.found == 'true'
+    needs: [commands, lint]
     runs-on: self-hosted
     strategy:
       fail-fast: true
       matrix:
-        command: ${{ fromJson(needs.discover-go.outputs.commands) }}
+        command: ${{ fromJson(needs.commands.outputs.commands) }}
     steps:
-      - uses: actions/checkout@v7
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
-      - name: "Test"
+      - name: Test
         uses: ./.github/actions/test
         with:
-          paths: ./cmd/${{ matrix.command }}/...
-          report-name: test-report-go-${{ matrix.command }}
+          path: ./cmd/${{ matrix.command }}/...
+          report: "${{ matrix.command }} tests"
 
-  quality-gate:
+  quality:
+    name: Quality gate
     if: always()
-    needs: [discover-go, test-go]
+    needs: [commands, lint, test]
     runs-on: self-hosted
     steps:
-      - name: "Require all test matrices to pass"
+      - name: Check quality
         if: >-
           ${{
-            needs.discover-go.result != 'success' ||
-            (needs.discover-go.outputs.has-targets == 'true' && needs.test-go.result != 'success')
+            needs.commands.result != 'success' ||
+            (needs.commands.outputs.found == 'true' && needs.lint.result != 'success') ||
+            (needs.commands.outputs.found == 'true' && needs.test.result != 'success')
           }}
-        run: |
-          echo "One or more quality matrices did not pass."
-          exit 1
+        run: exit 1
 
-  # ─── BUILD ───────────────────────────────────────────────────────────
-  build-go:
-    if: needs.discover-go.outputs.has-targets == 'true'
-    needs: [quality-gate, discover-go]
+  build:
+    name: Build ${{ matrix.command }}
+    if: needs.commands.outputs.found == 'true'
+    needs: [quality, commands]
+    permissions:
+      contents: read
     strategy:
       fail-fast: true
       matrix:
-        command: ${{ fromJson(needs.discover-go.outputs.commands) }}
-    uses: ./.github/workflows/go-build.yaml
+        command: ${{ fromJson(needs.commands.outputs.commands) }}
+    uses: ./.github/workflows/build.yaml
     with:
-      import-path: ./cmd/${{ matrix.command }}
-      binary-name: ${{ matrix.command }}
-      target-id: go-${{ matrix.command }}
+      path: ./cmd/${{ matrix.command }}
+      name: ${{ matrix.command }}
 
-  build-gate:
+  built:
+    name: Build gate
     if: always()
-    needs: [discover-go, build-go]
+    needs: [commands, build]
     runs-on: self-hosted
     steps:
-      - name: "Require all build matrices to pass"
+      - name: Check builds
         if: >-
           ${{
-            needs.discover-go.result != 'success' ||
-            (needs.discover-go.outputs.has-targets == 'true' && needs.build-go.result != 'success')
+            needs.commands.result != 'success' ||
+            (needs.commands.outputs.found == 'true' && needs.build.result != 'success')
           }}
-        run: |
-          echo "One or more builds did not pass."
-          exit 1
+        run: exit 1
 
-  # ─── SCAN ────────────────────────────────────────────────────────────
-  scan-go:
-    if: needs.discover-go.outputs.has-targets == 'true'
-    needs: [build-gate, discover-go]
+  scan:
+    name: Scan ${{ matrix.command }}
+    if: needs.commands.outputs.found == 'true'
+    needs: [built, commands]
+    permissions:
+      contents: read
+      security-events: write
     strategy:
       fail-fast: true
       matrix:
-        command: ${{ fromJson(needs.discover-go.outputs.commands) }}
-    uses: ./.github/workflows/go-scan.yaml
+        command: ${{ fromJson(needs.commands.outputs.commands) }}
+    uses: ./.github/workflows/scan.yaml
     with:
-      target-id: go-${{ matrix.command }}
+      name: ${{ matrix.command }}
 
-  scan-gate:
+  scanned:
+    name: Scan gate
     if: always()
-    needs: [discover-go, scan-go]
+    needs: [commands, scan]
     runs-on: self-hosted
     steps:
-      - name: "Require all scan matrices to pass"
+      - name: Check scans
         if: >-
           ${{
-            needs.discover-go.result != 'success' ||
-            (needs.discover-go.outputs.has-targets == 'true' && needs.scan-go.result != 'success')
+            needs.commands.result != 'success' ||
+            (needs.commands.outputs.found == 'true' && needs.scan.result != 'success')
           }}
-        run: |
-          echo "One or more scans did not pass."
-          exit 1
+        run: exit 1
 
-  # ─── SIGN ────────────────────────────────────────────────────────────
-  sign-go:
-    if: needs.discover-go.outputs.has-targets == 'true'
-    needs: [scan-gate, discover-go]
+  sign:
+    name: Sign ${{ matrix.command }}
+    if: needs.commands.outputs.found == 'true'
+    needs: [scanned, commands]
+    permissions:
+      contents: read
+      id-token: write
     strategy:
       fail-fast: true
       matrix:
-        command: ${{ fromJson(needs.discover-go.outputs.commands) }}
-    uses: ./.github/workflows/go-sign.yaml
+        command: ${{ fromJson(needs.commands.outputs.commands) }}
+    uses: ./.github/workflows/sign.yaml
     with:
-      binary-name: ${{ matrix.command }}
-      target-id: go-${{ matrix.command }}
+      name: ${{ matrix.command }}
 
-  sign-gate:
+  signed:
+    name: Sign gate
     if: always()
-    needs: [discover-go, sign-go]
+    needs: [commands, sign]
     runs-on: self-hosted
     steps:
-      - name: "Require all signing matrices to pass"
+      - name: Check signatures
         if: >-
           ${{
-            (needs.discover-go.outputs.has-targets == 'true' && needs.sign-go.result != 'success')
+            needs.commands.result != 'success' ||
+            (needs.commands.outputs.found == 'true' && needs.sign.result != 'success')
           }}
-        run: |
-          echo "One or more signings did not pass."
-          exit 1
+        run: exit 1
 
-  # ─── ATTEST ──────────────────────────────────────────────────────────
-  attest-go:
-    if: needs.discover-go.outputs.has-targets == 'true'
-    needs: [sign-gate, discover-go]
+  attest:
+    name: Attest ${{ matrix.command }}
+    if: needs.commands.outputs.found == 'true'
+    needs: [signed, commands]
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     strategy:
       fail-fast: true
       matrix:
-        command: ${{ fromJson(needs.discover-go.outputs.commands) }}
-    uses: ./.github/workflows/go-attest.yaml
+        command: ${{ fromJson(needs.commands.outputs.commands) }}
+    uses: ./.github/workflows/attest.yaml
     with:
-      binary-name: ${{ matrix.command }}
-      target-id: go-${{ matrix.command }}
+      name: ${{ matrix.command }}
+
+  attested:
+    name: Attestation gate
+    if: always()
+    needs: [commands, attest]
+    runs-on: self-hosted
+    steps:
+      - name: Check attestations
+        if: >-
+          ${{
+            needs.commands.result != 'success' ||
+            (needs.commands.outputs.found == 'true' && needs.attest.result != 'success')
+          }}
+        run: exit 1
+
+  release:
+    name: Create release
+    if: ${{ success() && startsWith(github.ref, 'refs/tags/v') }}
+    needs: attested
+    permissions:
+      contents: write
+    runs-on: self-hosted
+    steps:
+      - name: Create release
+        uses: softprops/action-gh-release@v3.0.2
+        with:
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+
+  publish:
+    name: Publish ${{ matrix.command }}
+    if: ${{ startsWith(github.ref, 'refs/tags/v') && needs.commands.outputs.found == 'true' }}
+    needs: [commands, release]
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: true
+      matrix:
+        command: ${{ fromJson(needs.commands.outputs.commands) }}
+    uses: ./.github/workflows/publish.yaml
+    with:
+      name: ${{ matrix.command }}
+
+  published:
+    name: Publish gate
+    if: ${{ always() && startsWith(github.ref, 'refs/tags/v') }}
+    needs: [commands, release, publish]
+    runs-on: self-hosted
+    steps:
+      - name: Check release assets
+        if: >-
+          ${{
+            needs.release.result != 'success' ||
+            (needs.commands.outputs.found == 'true' && needs.publish.result != 'success')
+          }}
+        run: exit 1

@@ -1,14 +1,14 @@
-name: 'Test'
-description: 'Run Go tests with JUnit report'
+name: Test
+description: Run Go tests with JUnit report
 inputs:
-  paths:
-    description: 'Paths to test'
+  path:
+    description: Path to test
     required: true
-  go-version-file:
+  module:
     description: 'Path to go.mod for Go version detection'
     required: false
     default: 'go.mod'
-  report-name:
+  report:
     description: 'Name for the test report artifact'
     required: true
 runs:
@@ -17,19 +17,20 @@ runs:
     - name: Setup Go
       uses: actions/setup-go@v7
       with:
-        go-version-file: ${{ inputs.go-version-file }}
+        go-version-file: ${{ inputs.module }}
+        cache: false
 
     - name: Install gotestsum
-      run: go install gotest.tools/gotestsum@latest
+      run: go install gotest.tools/gotestsum@v1.13.0
       shell: bash
 
-    - name: "Test"
-      run: gotestsum --junitfile reports/tests.xml --format standard-verbose -- -short ${{ inputs.paths }}
+    - name: Test
+      run: gotestsum --junitfile "$RUNNER_TEMP/tests.xml" --format standard-verbose -- -short ${{ inputs.path }}
       shell: bash
 
-    - name: "Report"
+    - name: Upload test results
       if: always()
       uses: actions/upload-artifact@v7
       with:
-        name: ${{ inputs.report-name }}
-        path: reports/tests.xml
+        name: ${{ inputs.report }}
+        path: ${{ runner.temp }}/tests.xml

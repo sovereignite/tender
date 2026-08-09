@@ -1,0 +1,30 @@
+name: Publish
+
+on:
+  workflow_call:
+    inputs:
+      name:
+        description: Command name
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: Publish ${{ inputs.name }}
+    runs-on: self-hosted
+    steps:
+      - name: Download build
+        uses: actions/download-artifact@v7
+        with:
+          name: ${{ inputs.name }}
+          path: ${{ runner.temp }}/${{ inputs.name }}/
+
+      - name: Publish
+        uses: softprops/action-gh-release@v3.0.2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: ${{ runner.temp }}/${{ inputs.name }}/*
+          fail_on_unmatched_files: true

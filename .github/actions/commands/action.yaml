@@ -1,28 +1,28 @@
-name: 'Discover Go Commands'
+name: Discover commands
 description: 'Find all Go commands in cmd/*'
 inputs:
-  changed-files:
+  files:
     description: 'Newline-delimited changed file paths'
     required: false
-  full-build:
+  all:
     description: 'Whether all targets are required'
     required: false
     default: 'false'
 outputs:
   commands:
     description: 'List of Go command names'
-    value: ${{ steps.discover.outputs.commands }}
-  has-targets:
+    value: ${{ steps.commands.outputs.commands }}
+  found:
     description: 'Whether any Go commands are affected'
-    value: ${{ steps.discover.outputs.has-targets }}
+    value: ${{ steps.commands.outputs.found }}
 runs:
   using: "composite"
   steps:
-    - name: "Discover"
-      id: discover
+    - name: Discover commands
+      id: commands
       env:
-        CHANGED_FILES: ${{ inputs.changed-files }}
-        FULL_BUILD: ${{ inputs.full-build }}
+        CHANGED_FILES: ${{ inputs.files }}
+        FULL_BUILD: ${{ inputs.all }}
       run: |
         mapfile -t candidates < <(find cmd -maxdepth 1 -type d -not -name cmd -exec basename {} \; | sort)
         changed="$CHANGED_FILES"
@@ -40,10 +40,10 @@ runs:
 
         if [ "${#selected[@]}" -eq 0 ]; then
           echo 'commands=["__skip__"]' >> "$GITHUB_OUTPUT"
-          echo 'has-targets=false' >> "$GITHUB_OUTPUT"
+          echo 'found=false' >> "$GITHUB_OUTPUT"
         else
           commands=$(printf '%s\n' "${selected[@]}" | jq -R -s -c 'split("\n") | map(select(length > 0))')
           echo "commands=$commands" >> "$GITHUB_OUTPUT"
-          echo 'has-targets=true' >> "$GITHUB_OUTPUT"
+          echo 'found=true' >> "$GITHUB_OUTPUT"
         fi
       shell: bash

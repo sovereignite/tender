@@ -1,0 +1,50 @@
+name: Build
+
+on:
+  workflow_call:
+    inputs:
+      path:
+        description: Path to build
+        required: true
+        type: string
+      name:
+        description: Command name
+        required: true
+        type: string
+      os:
+        description: 'Target GOOS'
+        required: false
+        type: string
+        default: 'linux'
+      arch:
+        description: 'Target GOARCH'
+        required: false
+        type: string
+        default: 'amd64'
+      module:
+        description: 'Path to go.mod for Go version detection'
+        required: false
+        type: string
+        default: 'go.mod'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ inputs.name }}
+    runs-on: self-hosted
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Build
+        uses: ./.github/actions/build
+        with:
+          path: ${{ inputs.path }}
+          name: ${{ inputs.name }}
+          os: ${{ inputs.os }}
+          arch: ${{ inputs.arch }}
+          module: ${{ inputs.module }}

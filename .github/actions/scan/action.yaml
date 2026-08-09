@@ -1,0 +1,41 @@
+name: Scan
+description: Scan a command SBOM for vulnerabilities
+inputs:
+  name:
+    description: Command name
+    required: true
+  os:
+    description: Target operating system
+    required: false
+    default: linux
+  arch:
+    description: Target architecture
+    required: false
+    default: amd64
+  fail:
+    description: 'Fail build on vulnerabilities'
+    required: false
+    default: 'true'
+runs:
+  using: "composite"
+  steps:
+    - name: Download build
+      uses: actions/download-artifact@v7
+      with:
+        name: ${{ inputs.name }}
+        path: ${{ runner.temp }}/${{ inputs.name }}/
+
+    - name: Scan SBOM
+      id: scan
+      uses: anchore/scan-action@v7
+      with:
+        sbom: ${{ runner.temp }}/${{ inputs.name }}/${{ inputs.name }}-${{ inputs.os }}-${{ inputs.arch }}.spdx.json
+        fail-build: ${{ inputs.fail }}
+        output-format: sarif
+
+    - name: Upload scan results
+      if: always()
+      uses: github/codeql-action/upload-sarif@v4
+      with:
+        sarif_file: ${{ steps.scan.outputs.sarif }}
+        category: ${{ inputs.name }}

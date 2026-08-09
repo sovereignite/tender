@@ -29,6 +29,28 @@ func TestCheckFileAllowsSourceText(t *testing.T) {
 	}
 }
 
+func TestCheckFileRejectsGitHubHostedRunner(t *testing.T) {
+	t.Parallel()
+	violations := checkFile(
+		indexEntry{mode: "100644", path: ".github/workflows/ci.yaml"},
+		[]byte("jobs:\n  test:\n    runs-on: ubuntu-latest\n"),
+	)
+	if !containsViolation(violations, "GitHub-hosted runners") {
+		t.Fatalf("violations = %v", violations)
+	}
+}
+
+func TestCheckFileAllowsSelfHostedRunner(t *testing.T) {
+	t.Parallel()
+	violations := checkFile(
+		indexEntry{mode: "100644", path: ".github/workflows/ci.yaml"},
+		[]byte("jobs:\n  test:\n    runs-on: self-hosted\n"),
+	)
+	if len(violations) != 0 {
+		t.Fatalf("violations = %v", violations)
+	}
+}
+
 func containsViolation(violations []string, want string) bool {
 	for _, violation := range violations {
 		if strings.Contains(violation, want) {

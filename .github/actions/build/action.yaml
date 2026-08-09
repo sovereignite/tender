@@ -1,0 +1,60 @@
+name: Build
+description: Build a command and its distribution metadata
+inputs:
+  path:
+    description: Path to build
+    required: true
+  name:
+    description: Command name
+    required: true
+  os:
+    description: 'Target GOOS'
+    required: false
+    default: 'linux'
+  arch:
+    description: 'Target GOARCH'
+    required: false
+    default: 'amd64'
+  module:
+    description: 'Path to go.mod for Go version detection'
+    required: false
+    default: 'go.mod'
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Go
+      uses: actions/setup-go@v7
+      with:
+        go-version-file: ${{ inputs.module }}
+        cache: false
+
+    - name: Build
+      id: build
+      env:
+        GOOS: ${{ inputs.os }}
+        GOARCH: ${{ inputs.arch }}
+        CGO_ENABLED: '0'
+        NAME: ${{ inputs.name }}
+        ROOT: ${{ runner.temp }}/${{ inputs.name }}
+      run: |
+        file="${NAME}-${GOOS}-${GOARCH}"
+        mkdir -p "$ROOT"
+        go build -trimpath -ldflags="-s -w" -o "$ROOT/$file" "${{ inputs.path }}"
+        (cd "$ROOT" && sha256sum "$file" > "$file.sha256")
+      shell: bash
+
+    - name: Generate SBOM
+      uses: anchore/sbom-action@v0
+      with:
+        file: ${{ runner.temp }}/${{ inputs.name }}/${{ inputs.name }}-${{ inputs.os }}-${{ inputs.arch }}
+        format: spdx-json
+        output-file: ${{ runner.temp }}/${{ inputs.name }}/${{ inputs.name }}-${{ inputs.os }}-${{ inputs.arch }}.spdx.json
+        upload-artifact: false
+        upload-release-assets: false
+
+    - name: Upload build
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ inputs.name }}
+        path: ${{ runner.temp }}/${{ inputs.name }}/
+        retention-days: 7

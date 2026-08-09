@@ -1,0 +1,42 @@
+name: Attest
+
+on:
+  workflow_call:
+    inputs:
+      name:
+        description: Command name
+        required: true
+        type: string
+      os:
+        description: Target operating system
+        required: false
+        type: string
+        default: linux
+      arch:
+        description: Target architecture
+        required: false
+        type: string
+        default: amd64
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+  artifact-metadata: write
+
+jobs:
+  attest:
+    name: Attest ${{ inputs.name }}
+    runs-on: self-hosted
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Attest
+        uses: ./.github/actions/attest
+        with:
+          name: ${{ inputs.name }}
+          os: ${{ inputs.os }}
+          arch: ${{ inputs.arch }}
