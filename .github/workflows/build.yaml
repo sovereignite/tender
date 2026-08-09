@@ -32,7 +32,7 @@ permissions:
 
 jobs:
   build:
-    name: Build ${{ inputs.name }}
+    name: Run
     runs-on: self-hosted
     steps:
       - name: Check out source

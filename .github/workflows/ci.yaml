@@ -57,7 +57,7 @@ jobs:
           all: ${{ needs.changes.outputs.all }}
 
   lint:
-    name: Lint ${{ matrix.command }}
+    name: Lint
     if: needs.commands.outputs.found == 'true'
     needs: commands
     runs-on: self-hosted
@@ -77,7 +77,7 @@ jobs:
           path: ./cmd/${{ matrix.command }}/...
 
   test:
-    name: Test ${{ matrix.command }}
+    name: Test
     if: needs.commands.outputs.found == 'true'
     needs: [commands, lint]
     runs-on: self-hosted
@@ -113,7 +113,7 @@ jobs:
         run: exit 1
 
   build:
-    name: Build ${{ matrix.command }}
+    name: Build
     if: needs.commands.outputs.found == 'true'
     needs: [quality, commands]
     permissions:
@@ -142,7 +142,7 @@ jobs:
         run: exit 1
 
   scan:
-    name: Scan ${{ matrix.command }}
+    name: Scan
     if: needs.commands.outputs.found == 'true'
     needs: [built, commands]
     permissions:
@@ -171,7 +171,7 @@ jobs:
         run: exit 1
 
   sign:
-    name: Sign ${{ matrix.command }}
+    name: Sign
     if: needs.commands.outputs.found == 'true'
     needs: [scanned, commands]
     permissions:
@@ -200,7 +200,7 @@ jobs:
         run: exit 1
 
   attest:
-    name: Attest ${{ matrix.command }}
+    name: Attest
     if: needs.commands.outputs.found == 'true'
     needs: [signed, commands]
     permissions:
@@ -245,7 +245,7 @@ jobs:
           generate_release_notes: true
 
   publish:
-    name: Publish ${{ matrix.command }}
+    name: Publish
     if: ${{ startsWith(github.ref, 'refs/tags/v') && needs.commands.outputs.found == 'true' }}
     needs: [commands, release]
     permissions:
