@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   publish:
-    name: Publish ${{ inputs.name }}
+    name: Run
     runs-on: self-hosted
     steps:
       - name: Download build

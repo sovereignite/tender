@@ -24,7 +24,7 @@ permissions:
 
 jobs:
   scan:
-    name: Scan ${{ inputs.name }}
+    name: Run
     runs-on: self-hosted
     steps:
       - name: Check out source

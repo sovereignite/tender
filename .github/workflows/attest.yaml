@@ -26,7 +26,7 @@ permissions:
 
 jobs:
   attest:
-    name: Attest ${{ inputs.name }}
+    name: Run
     runs-on: self-hosted
     steps:
       - name: Check out source
