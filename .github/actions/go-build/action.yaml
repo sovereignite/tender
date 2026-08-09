@@ -44,11 +44,11 @@ runs:
         GOARCH: ${{ inputs.goarch }}
         CGO_ENABLED: '0'
       run: |
-        mkdir -p dist
+        mkdir -p bin
         BINARY="${{ inputs.binary-name }}"
-        go build -trimpath -ldflags="-s -w" -o "dist/${BINARY}" "./${{ inputs.import-path }}"
-        DIGEST=$(sha256sum "dist/${BINARY}" | awk '{print $1}')
-        echo "binary=dist/${BINARY}" >> "$GITHUB_OUTPUT"
+        go build -trimpath -ldflags="-s -w" -o "bin/${BINARY}" "./${{ inputs.import-path }}"
+        DIGEST=$(sha256sum "bin/${BINARY}" | awk '{print $1}')
+        echo "binary=bin/${BINARY}" >> "$GITHUB_OUTPUT"
         echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
       shell: bash
 
@@ -56,7 +56,7 @@ runs:
       uses: actions/upload-artifact@v7
       with:
         name: binary-${{ inputs.target-id }}
-        path: dist/${{ inputs.binary-name }}
+        path: bin/${{ inputs.binary-name }}
         retention-days: 1
 
     - name: "Upload digest"

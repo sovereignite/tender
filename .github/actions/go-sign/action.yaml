@@ -19,12 +19,12 @@ runs:
     - name: "Sign binary"
       run: |
         BINARY=$(ls /tmp/binary/*)
-        cosign sign-blob --yes --output-signature "${BINARY}.sig" "${BINARY}"
+        cosign sign-blob --yes --bundle "${BINARY}.sigstore.json" "${BINARY}"
       shell: bash
 
     - name: "Upload signature"
       uses: actions/upload-artifact@v7
       with:
-        name: binary-sig-${{ inputs.target-id }}
-        path: /tmp/binary/*.sig
+        name: binary-signature-${{ inputs.target-id }}
+        path: /tmp/binary/*.sigstore.json
         retention-days: 1
