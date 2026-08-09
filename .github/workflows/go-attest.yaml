@@ -3,6 +3,10 @@ name: Go Attest
 on:
   workflow_call:
     inputs:
+      binary-name:
+        description: 'Binary filename'
+        required: true
+        type: string
       target-id:
         description: 'Stable logical target id used in artifact names'
         required: true
@@ -23,4 +27,5 @@ jobs:
       - name: "Attest"
         uses: ./.github/actions/go-attest
         with:
+          binary-name: ${{ inputs.binary-name }}
           target-id: ${{ inputs.target-id }}

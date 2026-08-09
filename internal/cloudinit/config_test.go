@@ -46,6 +46,9 @@ func TestGenerateUserDataUsesVsockPhoneHome(t *testing.T) {
 	if strings.Contains(userData, "api.github.com/repos/actions/runner") || strings.Contains(userData, "actions-runner-linux-x64") {
 		t.Fatal("generated user data still downloads the runner")
 	}
+	if strings.Contains(userData, "--ephemeral") {
+		t.Fatal("generated user data configures an ephemeral runner")
+	}
 }
 
 func TestBuildSeedImage(t *testing.T) {

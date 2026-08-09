@@ -19,13 +19,13 @@ runs:
       uses: actions/download-artifact@v7
       with:
         name: binary-${{ inputs.target-id }}
-        path: /tmp/binary/
+        path: ${{ runner.temp }}/binary-${{ inputs.target-id }}/
 
     - name: "Generate SBOM"
       id: sbom
       uses: anchore/sbom-action@v0
       with:
-        path: /tmp/binary/
+        path: ${{ runner.temp }}/binary-${{ inputs.target-id }}/
         format: spdx-json
         output-file: sbom.spdx.json
 

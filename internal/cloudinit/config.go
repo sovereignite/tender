@@ -75,7 +75,7 @@ runcmd:
     cd /opt/actions-runner
     tar xzf /mnt/gh-runner-tools/actions-runner.tar.gz
     chown -R {{ .Username }}:{{ .Username }} /opt/actions-runner
-    sudo -u {{ .Username }} ./config.sh --url https://github.com/{{ .Organization }} --token {{ .Token }} --name {{ .RunnerName }}{{ if .Labels }} --labels {{ joinLabels .Labels }}{{ end }}{{ if .Group }} --runnergroup {{ .Group }}{{ end }} --work _work --replace --unattended --ephemeral
+    sudo -u {{ .Username }} ./config.sh --url https://github.com/{{ .Organization }} --token {{ .Token }} --name {{ .RunnerName }}{{ if .Labels }} --labels {{ joinLabels .Labels }}{{ end }}{{ if .Group }} --runnergroup {{ .Group }}{{ end }} --work _work --replace --unattended
     ./svc.sh install {{ .Username }}
     ./svc.sh start
     /usr/local/libexec/distaff --instance-id {{ printf "%q" .RunnerName }} --port {{ .PhoneHomePort }}

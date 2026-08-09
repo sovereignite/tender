@@ -132,8 +132,6 @@ health, phone-home, image-cache, or storage code. In particular:
   filesystem paths, or libvirt XML.
 - Authenticate phone-home events and bound payload sizes and I/O deadlines.
 - Verify downloaded artifacts before publishing or trusting cached entries.
-- An ephemeral runner is not currently recycled after completing a job. Do not
-  claim otherwise or rely on automatic reboot or re-registration behavior.
 
 ## Documentation Instructions
 

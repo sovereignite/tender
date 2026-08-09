@@ -1,6 +1,9 @@
 name: 'Go Sign'
 description: 'Sign Go binary with cosign'
 inputs:
+  binary-name:
+    description: 'Binary filename'
+    required: true
   target-id:
     description: 'Stable logical target id used in artifact names'
     required: true
@@ -11,14 +14,14 @@ runs:
       uses: actions/download-artifact@v7
       with:
         name: binary-${{ inputs.target-id }}
-        path: /tmp/binary/
+        path: ${{ runner.temp }}/binary-${{ inputs.target-id }}/
 
     - name: "Install cosign"
       uses: sigstore/cosign-installer@v4.1.0
 
     - name: "Sign binary"
       run: |
-        BINARY=$(ls /tmp/binary/*)
+        BINARY="${{ runner.temp }}/binary-${{ inputs.target-id }}/${{ inputs.binary-name }}"
         cosign sign-blob --yes --bundle "${BINARY}.sigstore.json" "${BINARY}"
       shell: bash
 
@@ -26,5 +29,5 @@ runs:
       uses: actions/upload-artifact@v7
       with:
         name: binary-signature-${{ inputs.target-id }}
-        path: /tmp/binary/*.sigstore.json
+        path: ${{ runner.temp }}/binary-${{ inputs.target-id }}/*.sigstore.json
         retention-days: 1

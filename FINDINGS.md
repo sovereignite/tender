@@ -68,16 +68,6 @@ Provisioning uses `set -x`, which can place the registration token in cloud-init
 
 Do not trace commands containing secrets. Detach and securely delete the seed before accepting jobs, or use a just-in-time runner configuration that does not retain a reusable registration token.
 
-### 6. Ephemeral runners are not recycled after their first job
-
-Reference:
-
-- `internal/cloudinit/config.go:68-81`
-
-Provisioning configures the runner with `--ephemeral` and starts the normal runner service, but it does not install a post-job reboot, recreation, or re-registration mechanism. After one job, GitHub removes the ephemeral registration and the listener exits, leaving an idle VM rather than restoring fresh state.
-
-Install and test an explicit post-job lifecycle that reboots or recreates the VM and obtains a new registration before starting the next listener.
-
 ### 7. Phone-home readiness can be spoofed or exhausted by another guest
 
 References:
@@ -223,7 +213,7 @@ References:
 - `internal/health/checker.go`
 - `internal/github/app.go`
 
-There are no automated tests for managed-domain filtering, duplicate names, failed destroy/undefine, creation rollback, ephemeral recycling, phone-home authentication and limits, repository runners, configuration precedence, or GitHub App timeout behavior.
+There are no automated tests for managed-domain filtering, duplicate names, failed destroy/undefine, creation rollback, phone-home authentication and limits, repository runners, configuration precedence, or GitHub App timeout behavior.
 
 Add a fake libvirt transport for failure-order tests and isolated integration tests for define, start, phone-home, job completion, recycle, and destroy behavior.
 

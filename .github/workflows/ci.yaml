@@ -172,6 +172,7 @@ jobs:
         command: ${{ fromJson(needs.discover-go.outputs.commands) }}
     uses: ./.github/workflows/go-sign.yaml
     with:
+      binary-name: ${{ matrix.command }}
       target-id: go-${{ matrix.command }}
 
   sign-gate:
@@ -198,4 +199,5 @@ jobs:
         command: ${{ fromJson(needs.discover-go.outputs.commands) }}
     uses: ./.github/workflows/go-attest.yaml
     with:
+      binary-name: ${{ matrix.command }}
       target-id: go-${{ matrix.command }}
