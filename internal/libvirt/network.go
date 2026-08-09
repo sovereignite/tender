@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	DefaultNetworkName = "gh-runners"
+	DefaultNetworkName = "shuttle"
 	DefaultSubnet      = "192.168.122"
 	DefaultGateway     = "192.168.122.1"
 	DefaultDHCPStart   = "192.168.122.100"

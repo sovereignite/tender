@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sovereignite/gh-workers/internal/libvirt"
-	"github.com/sovereignite/gh-workers/internal/runner"
+	"github.com/sovereignite/shuttle/internal/libvirt"
+	"github.com/sovereignite/shuttle/internal/runner"
 )
 
 // Status represents the health status of a runner.

@@ -7,13 +7,13 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/sovereignite/gh-workers/internal/config"
-	"github.com/sovereignite/gh-workers/internal/github"
-	"github.com/sovereignite/gh-workers/internal/health"
-	"github.com/sovereignite/gh-workers/internal/images"
-	"github.com/sovereignite/gh-workers/internal/libvirt"
-	"github.com/sovereignite/gh-workers/internal/logging"
-	"github.com/sovereignite/gh-workers/internal/runner"
+	"github.com/sovereignite/shuttle/internal/config"
+	"github.com/sovereignite/shuttle/internal/github"
+	"github.com/sovereignite/shuttle/internal/health"
+	"github.com/sovereignite/shuttle/internal/images"
+	"github.com/sovereignite/shuttle/internal/libvirt"
+	"github.com/sovereignite/shuttle/internal/logging"
+	"github.com/sovereignite/shuttle/internal/runner"
 	"github.com/spf13/cobra"
 )
 
@@ -37,9 +37,9 @@ func main() {
 	var logger *logging.Logger
 
 	rootCmd := &cobra.Command{
-		Use:   "gh-runner",
-		Short: "GitHub Actions runner VM manager",
-		Long:  "Manage self-hosted GitHub Actions runner VMs using libvirt",
+		Use:   "shuttle",
+		Short: "Build installable Linux systems",
+		Long:  "Build installable Linux systems from resources for bootable media and development targets",
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			// Load config file if specified
 			configFile, _ := cmd.Flags().GetString("config")
@@ -484,9 +484,9 @@ func main() {
 func phoneHomeBinaryPath() (string, error) {
 	executable, err := os.Executable()
 	if err != nil {
-		return "", fmt.Errorf("locate gh-runner executable: %w", err)
+		return "", fmt.Errorf("locate shuttle executable: %w", err)
 	}
-	path := filepath.Join(filepath.Dir(executable), "gh-runner-phone-home")
+	path := filepath.Join(filepath.Dir(executable), "distaff")
 	if _, err := os.Stat(path); err != nil {
 		return "", fmt.Errorf("phone-home binary %q is unavailable: %w", path, err)
 	}

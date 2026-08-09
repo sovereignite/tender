@@ -1,0 +1,10 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "sparql": {
+      "type": "local",
+      "command": ["uvx", "sparql-mcp"],
+      "enabled": true
+    }
+  }
+}

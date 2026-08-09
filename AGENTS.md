@@ -1,133 +1,159 @@
 # AGENTS.md
 
-## Project
+## Project Overview
 
-Configure self-hosted GitHub Actions runner VMs for the Sovereignite organization using **virsh/libvirt** — implemented as a **Go program** using libvirt bindings.
+Shuttle builds installable Linux systems from resources and exercises them with
+development targets. The current implementation provisions GitHub Actions
+runner VMs through libvirt. `shuttle` is the host CLI; `distaff` is the small
+guest-side agent that reports readiness to the host over virtio-vsock.
 
-## Environment
+The intended resource and delivery model is tracked in GitHub issue #1 and its
+sub-issues. It introduces declarative resources, architecture-specific OS
+images and system extensions, and a generic deployment-target interface. Do
+not describe that design as implemented until its code exists.
 
-- Nix flake + direnv provides the dev shell (run `direnv allow` to activate)
-- The Nix shell supplies tools; the actual work is **libvirt/virsh VM management**
-- Application source code is in `cmd/gh-runner/` and `internal/`
+Role definitions and routing live in `docs/roles-and-skills.md`. OpenCode agent
+definitions live in `.opencode/agent/`. Keep this file focused on repository
+instructions shared by every coding agent.
 
-## Key Tools in Dev Shell
+## Development Environment
 
-- **VM/infra**: opentofu, cfssl, openssl, tpm2-tools
-- **Go toolchain**: go, golangci-lint, gopls, protoc-gen-go
-- **K8s**: kubectl, helm, kustomize, kpt, kubeconform, kind
-- **Containers**: podman, ko
-- **Build**: bazel, gnumake, go-task, just
-- **GitHub**: gh CLI
-- **Other**: jq, dasel, nodejs
+- The repository is a Go module: `github.com/sovereignite/shuttle`.
+- A Nix flake supplies the development tools. Direnv users should run
+  `direnv allow`; otherwise use `nix develop`.
+- Libvirt operations mutate host VM, network, and storage state. Do not run a
+  live lifecycle operation unless the task requires it and its target is known
+  to be safe.
+- The host implementation uses the pure-Go `go-libvirt` client. Do not add a
+  CGo requirement without a concrete need.
+- `.env.local` is intentionally untracked. Never commit credentials, runner
+  registration tokens, GitHub App private keys, or generated secrets.
 
-## Repo Quirks
+## Repository Layout
 
-- `config.allowUnfree = true` is set in the flake
-- Module path: `github.com/sovereignite/gh-workers`
-- Go dependencies: `go-libvirt` (pure Go, no CGo), `go-libvirt-xml`, `cobra`
+- `cmd/shuttle/`: host CLI entrypoint.
+- `cmd/distaff/`: guest phone-home binary.
+- `cmd/repo-check/`: repository file-policy hook.
+- `internal/images/`: OS image and GitHub runner release discovery.
+- `internal/libvirt/`: libvirt connection, domain, network, and storage work.
+- `internal/runner/`: current high-level runner VM orchestration.
+- `internal/cloudinit/`: cloud-init data and seed image generation.
+- `internal/phonehome/`: guest metadata collection and vsock transport.
+- `internal/isoimage/`: in-process ISO generation.
+- `docs/roles-and-skills.md`: role boundaries and planned skill ownership.
+- `FINDINGS.md`: reviewed correctness, security, and test gaps.
 
-## Go Program Architecture
+## Build Commands
 
-```
-gh-workers/
-├── cmd/gh-runner/main.go        # CLI entrypoint (cobra)
-├── internal/
-│   ├── libvirt/                 # Libvirt client wrapper
-│   │   ├── client.go            # Connection management
-│   │   ├── domain.go            # VM lifecycle
-│   │   ├── network.go           # NAT network (192.168.122.0/24)
-│   │   └── storage.go           # Disk/volume management
-│   ├── runner/                  # GitHub runner management
-│   │   ├── config.go            # Runner configuration
-│   │   └── manager.go           # High-level VM operations
-│   ├── cloudinit/               # Cloud-init configuration
-│   │   └── config.go            # User data generation
-│   ├── github/                  # GitHub App integration
-│   │   └── app.go               # Token generation
-│   ├── health/                  # Health checking
-│   │   └── checker.go           # Auto-recovery
-│   ├── config/                  # Configuration management
-│   │   └── config.go            # JSON config file
-│   └── logging/                 # Logging
-│       └── logger.go            # Level-based logging
-```
-
-## CLI Commands
+Run commands from the repository root.
 
 ```bash
-# Build
-go build -o gh-runner ./cmd/gh-runner
-
-# VM lifecycle
-./gh-runner create [name] --count=4 --org=sovereignite --labels=self-hosted,linux,x64
-./gh-runner list
-./gh-runner status [name]
-./gh-runner start [name]
-./gh-runner stop [name]
-./gh-runner destroy [name]
-./gh-runner wait [name]  # Wait for IP
-
-# Health checking
-./gh-runner health  # Check all runner health
-
-# With GitHub App integration
-./gh-runner create runner-1 \
-  --org sovereignignite \
-  --app-id 12345 \
-  --private-key /path/to/key.pem \
-  --cloud-init
-
-# With config file
-./gh-runner --config /path/to/config.json create runner-1
-
-# With logging
-./gh-runner --log-level debug create runner-1
+go build -o bin/shuttle ./cmd/shuttle
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/distaff ./cmd/distaff
+./bin/shuttle --help
 ```
 
-## VM Configuration
+Build generated executables under `bin/`; the directory is ignored. Do not
+write build outputs into the repository root or commit generated binaries.
 
-- **Network**: Uses existing `default` network (must be active)
-- **Storage**: Uses existing `default` pool (`/home/me/.local/share/libvirt/images/`)
-- **Base image**: Ubuntu 24.04 cloud image (auto-downloaded)
-- **Runner tools**: Versioned `GH_RUNNER_TOOLS` ISO cached in the shared images pool and attached read-only to every VM
-- **Default VM**: 4GB RAM, 2 CPUs, 20GB disk
-- **Ephemeral**: Clone-on-create, discard on destroy
+## Test and Validation Commands
 
-## Auto-Reboot Pattern
-
-VMs use `--ephemeral` runner flag + systemd reboot:
-1. Runner completes one job → exits
-2. systemd restarts runner → re-registers with GitHub
-3. Fresh state for every build
-
-## Runner Readiness: Vsock Phone Home
-
-Runner readiness uses virtio-vsock, not HTTP or the libvirt network:
-
-1. `gh-runner create` opens an `AF_VSOCK` listener on a dynamically assigned port before defining or starting the VM.
-2. The generated cloud-init seed contains that vsock port; both cloud-init and runner-tools ISOs are generated in-process with Go.
-3. The VM mounts the shared `GH_RUNNER_TOOLS` ISO and extracts the cached runner archive into its writable root disk.
-4. Cloud-init configures and starts the GitHub Actions runner service without downloading runner binaries.
-5. The native `gh-runner-phone-home` Go binary connects to host CID `2` and sends newline-delimited JSON containing `instance_id`, `hostname`, `fqdn`, `pub_key_rsa`, `pub_key_ecdsa`, and `pub_key_ed25519`.
-6. The Go listener records the guest CID and metadata, replies `OK`, and marks the matching runner ready.
-7. The `create` command exits successfully only after receiving that acknowledged callback.
-
-Do not replace this path with a callback to the libvirt gateway. Vsock deliberately avoids dependency on guest IP assignment, routing, NAT, DNS, or host firewall configuration.
-
-## Commands
+Run the narrowest relevant test first, then the full checks before finishing a
+substantial change.
 
 ```bash
-# Enter dev shell (if direnv not used)
-nix develop
-
-# Update flake inputs
-nix flake update
-
-# Check flake evaluates cleanly
-nix flake check
-
-# Build the host CLI and static Linux guest callback side by side
-go build -o gh-runner ./cmd/gh-runner
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o gh-runner-phone-home ./cmd/gh-runner-phone-home
-./gh-runner --help
+go test ./...
+go test -race ./...
+go vet ./...
+golangci-lint run
+go mod verify
+go run ./cmd/repo-check
 ```
+
+The pre-commit configuration runs repository policy checks, `gitleaks`, Go
+tests, and `golangci-lint`. There is currently no repository CI workflow, so do
+not imply that remote checks enforce these locally defined gates.
+
+Do not perform destructive libvirt integration tests by default. If a task
+requires one, state which domain, storage pool, volumes, and network may be
+modified before running it.
+
+## Current CLI
+
+These commands exist in `cmd/shuttle/main.go` today:
+
+```bash
+./shuttle create --org example-org
+./shuttle start NAME
+./shuttle stop NAME
+./shuttle destroy NAME
+./shuttle list
+./shuttle status NAME
+./shuttle wait NAME
+./shuttle health
+./shuttle console NAME
+./shuttle dumpxml NAME
+./shuttle images list
+./shuttle images select [DISTRO]
+```
+
+`create` accepts flags and no positional name. Use `./shuttle <command> --help`
+as the source of truth for current flags. The planned `shuttle deploy` command
+does not exist yet.
+
+## Code Style and Conventions
+
+- Follow standard Go formatting and idioms; run `gofmt` on changed Go files.
+- Keep changes small and explicit. Prefer extending existing packages over
+  adding abstraction before it has a concrete consumer.
+- Wrap errors with operation context using `%w`.
+- Pass `context.Context` through blocking, network, and lifecycle operations.
+- Keep host orchestration out of `distaff`; it is a bounded guest-side worker.
+- Generate structured YAML or XML through serializers rather than unescaped
+  string interpolation.
+- Use Go architecture names in declarations and translate them explicitly at
+  external boundaries. Planned supported architectures are `amd64`, `arm64`,
+  `riscv64`, `ppc64le`, `s390x`, and `loong64`; do not add `386`.
+- Add or update tests for behavior changes, especially lifecycle failure order,
+  resource ownership, artifact verification, and secret handling.
+
+## Security and Safety
+
+Read `FINDINGS.md` before changing lifecycle, provisioning, authentication,
+health, phone-home, image-cache, or storage code. In particular:
+
+- Never operate on a libvirt domain or volume without verifying Shuttle
+  ownership. Current list and health paths do not enforce this safely.
+- Reject duplicate names by default. Do not silently replace domains or disks.
+- Delete storage only after domain shutdown and undefinition are confirmed.
+- Roll back resources created by a failed create or deployment in reverse order.
+- Never log or retain runner registration tokens longer than required.
+- Validate values before placing them in cloud-init, YAML, shell commands, URLs,
+  filesystem paths, or libvirt XML.
+- Authenticate phone-home events and bound payload sizes and I/O deadlines.
+- Verify downloaded artifacts before publishing or trusting cached entries.
+- An ephemeral runner is not currently recycled after completing a job. Do not
+  claim otherwise or rely on automatic reboot or re-registration behavior.
+
+## Documentation Instructions
+
+- Document current behavior as current and proposed behavior as planned.
+- Source command syntax from Cobra definitions or `--help`, not memory.
+- Source defaults from code and name the defining file when the distinction
+  matters.
+- Keep detailed architecture decisions in design docs or issues, not in this
+  operational instruction file.
+- Update documentation when renaming commands, packages, binaries, resources,
+  or configuration fields.
+- Do not duplicate agent personalities here; update `.opencode/agent/` and
+  `docs/roles-and-skills.md` when role boundaries change.
+
+## Commit and Pull Request Guidance
+
+- Do not commit, amend, push, or open a pull request unless explicitly asked.
+- Before committing, inspect status and diffs and stage only intended files.
+- Use concise conventional commit subjects consistent with repository history,
+  such as `docs: align agent instructions with current behavior`.
+- Include tests or validation performed in the pull request description.
+- Call out skipped live libvirt testing and any remaining safety risk.
+- Never bypass hooks to make a change pass.

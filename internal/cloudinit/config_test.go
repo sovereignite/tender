@@ -31,8 +31,8 @@ func TestGenerateUserDataUsesVsockPhoneHome(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
-		"install -m 0755 /mnt/gh-runner-tools/gh-runner-phone-home /usr/local/libexec/gh-runner-phone-home",
-		"gh-runner-phone-home --instance-id \"runner\" --port 12345",
+		"install -m 0755 /mnt/gh-runner-tools/distaff /usr/local/libexec/distaff",
+		"distaff --instance-id \"runner\" --port 12345",
 		"mount -o ro LABEL=GH_RUNNER_TOOLS /mnt/gh-runner-tools",
 		"tar xzf /mnt/gh-runner-tools/actions-runner.tar.gz",
 	} {

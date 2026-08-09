@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"text/template"
 
-	"github.com/sovereignite/gh-workers/internal/isoimage"
+	"github.com/sovereignite/shuttle/internal/isoimage"
 )
 
 // Config holds the cloud-init configuration for a GitHub Actions runner.
@@ -71,14 +71,14 @@ runcmd:
     install -d -o {{ .Username }} -g {{ .Username }} /opt/actions-runner
     install -d /mnt/gh-runner-tools
     mount -o ro LABEL=GH_RUNNER_TOOLS /mnt/gh-runner-tools
-    install -m 0755 /mnt/gh-runner-tools/gh-runner-phone-home /usr/local/libexec/gh-runner-phone-home
+    install -m 0755 /mnt/gh-runner-tools/distaff /usr/local/libexec/distaff
     cd /opt/actions-runner
     tar xzf /mnt/gh-runner-tools/actions-runner.tar.gz
     chown -R {{ .Username }}:{{ .Username }} /opt/actions-runner
     sudo -u {{ .Username }} ./config.sh --url https://github.com/{{ .Organization }} --token {{ .Token }} --name {{ .RunnerName }}{{ if .Labels }} --labels {{ joinLabels .Labels }}{{ end }}{{ if .Group }} --runnergroup {{ .Group }}{{ end }} --work _work --replace --unattended --ephemeral
     ./svc.sh install {{ .Username }}
     ./svc.sh start
-    /usr/local/libexec/gh-runner-phone-home --instance-id {{ printf "%q" .RunnerName }} --port {{ .PhoneHomePort }}
+    /usr/local/libexec/distaff --instance-id {{ printf "%q" .RunnerName }} --port {{ .PhoneHomePort }}
 
 final_message: "GitHub Actions runner {{ .RunnerName }} is ready!"
 `

@@ -17,8 +17,8 @@ import (
 
 	"github.com/digitalocean/go-libvirt"
 	"github.com/libvirt/libvirt-go-xml"
-	"github.com/sovereignite/gh-workers/internal/images"
-	"github.com/sovereignite/gh-workers/internal/isoimage"
+	"github.com/sovereignite/shuttle/internal/images"
+	"github.com/sovereignite/shuttle/internal/isoimage"
 )
 
 const (
@@ -127,7 +127,7 @@ func derivedPoolXML(referenceXML, name string) (string, error) {
 	}
 
 	referencePath := filepath.Clean(reference.Target.Path)
-	targetPath := filepath.Join(filepath.Dir(referencePath), "gh-workers-"+name)
+	targetPath := filepath.Join(filepath.Dir(referencePath), "shuttle-"+name)
 
 	definition := libvirtxml.StoragePool{
 		Type: "dir",
@@ -349,7 +349,7 @@ func (c *Client) CacheRunnerTools(release images.RunnerRelease, callbackPath str
 	if err := downloadFile(release.URL, archivePath); err != nil {
 		return "", fmt.Errorf("failed to download GitHub Actions runner %s: %w", release.Version, err)
 	}
-	if err := copyFile(callbackPath, filepath.Join(workspace, "gh-runner-phone-home"), 0755); err != nil {
+	if err := copyFile(callbackPath, filepath.Join(workspace, "distaff"), 0755); err != nil {
 		return "", fmt.Errorf("failed to stage phone-home binary: %w", err)
 	}
 	isoPath := filepath.Join(dir, cacheName)

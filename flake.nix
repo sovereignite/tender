@@ -56,6 +56,7 @@
               shellcheck
               tpm2-pkcs11
               tpm2-tools
+              uv
               yamllint
 
               # Required by the Kustomize developer agent.

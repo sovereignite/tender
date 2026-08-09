@@ -1,6 +1,5 @@
-# Binaries (ignore root binary, not cmd directory)
-/gh-runner
-/gh-runner-phone-home
+# Build output
+/bin/
 *.exe
 
 # Go build cache
@@ -9,6 +8,12 @@
 
 # Nix/direnv cache
 .direnv/
+
+# OpenCode local dependencies
+/.opencode/node_modules/
+/.opencode/package.json
+/.opencode/package-lock.json
+/.opencode/bun.lock
 
 # User-specific env
 .env.local

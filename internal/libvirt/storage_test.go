@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	libvirtxml "github.com/libvirt/libvirt-go-xml"
-	"github.com/sovereignite/gh-workers/internal/images"
+	"github.com/sovereignite/shuttle/internal/images"
 )
 
 func TestDerivedPoolXMLUsesReferenceParent(t *testing.T) {
@@ -30,8 +30,8 @@ func TestDerivedPoolXMLUsesReferenceParent(t *testing.T) {
 	if pool.Name != "images" {
 		t.Errorf("pool name = %q, want images", pool.Name)
 	}
-	if pool.Target == nil || pool.Target.Path != "/home/example/gh-workers-images" {
-		t.Fatalf("pool target = %#v, want /home/example/gh-workers-images", pool.Target)
+	if pool.Target == nil || pool.Target.Path != "/home/example/shuttle-images" {
+		t.Fatalf("pool target = %#v, want /home/example/shuttle-images", pool.Target)
 	}
 }
 
@@ -50,8 +50,8 @@ func TestDerivedPoolXMLDoesNotOverlapConventionalImagesTarget(t *testing.T) {
 	if err := pool.Unmarshal(poolXML); err != nil {
 		t.Fatalf("failed to parse derived pool XML: %v", err)
 	}
-	if pool.Target == nil || pool.Target.Path != "/var/lib/libvirt/gh-workers-images" {
-		t.Fatalf("pool target = %#v, want /var/lib/libvirt/gh-workers-images", pool.Target)
+	if pool.Target == nil || pool.Target.Path != "/var/lib/libvirt/shuttle-images" {
+		t.Fatalf("pool target = %#v, want /var/lib/libvirt/shuttle-images", pool.Target)
 	}
 }
 

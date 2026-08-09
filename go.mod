@@ -1,4 +1,4 @@
-module github.com/sovereignite/gh-workers
+module github.com/sovereignite/shuttle
 
 go 1.26.5
 

@@ -65,7 +65,7 @@ func DefaultConfig() Config {
 	return Config{
 		Libvirt: LibvirtConfig{
 			URI:         "qemu:///system",
-			NetworkName: "gh-runners",
+			NetworkName: "shuttle",
 		},
 		Runner: RunnerConfig{
 			Labels:   []string{"self-hosted", "linux", "x64"},
@@ -123,7 +123,7 @@ func Save(cfg *Config, path string) error {
 func GetDefaultConfigPath() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "/etc/gh-runner/config.json"
+		return "/etc/shuttle/config.json"
 	}
-	return filepath.Join(home, ".config", "gh-runner", "config.json")
+	return filepath.Join(home, ".config", "shuttle", "config.json")
 }
