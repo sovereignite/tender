@@ -24,7 +24,7 @@ type NetworkConfig struct {
 	DHCPEnd   string
 }
 
-// NetworkGateway returns the IPv4 gateway advertised by a libvirt network.
+// NetworkGateway returns the IPv4 gateway advertised by a libvirt channels.
 func (c *Client) NetworkGateway(name string) (string, error) {
 	network, err := c.l.NetworkLookupByName(name)
 	if err != nil {
@@ -73,7 +73,7 @@ func (c *Client) NetworkExists(name string) bool {
 	return err == nil
 }
 
-// DeleteNetwork deletes a network.
+// DeleteNetwork deletes a channels.
 func (c *Client) DeleteNetwork(name string) error {
 	net, err := c.l.NetworkLookupByName(name)
 	if err != nil {
