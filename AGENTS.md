@@ -18,7 +18,7 @@ instructions shared by every coding agent.
 
 ## Development Environment
 
-- The repository is a Go module: `github.com/sovereignite/shuttle`.
+- The repository is a Go module: `github.com/sovereignite/tender`.
 - A Nix flake supplies the development tools. Direnv users should run
   `direnv allow`; otherwise use `nix develop`.
 - Libvirt operations mutate host VM, network, and storage state. Do not run a

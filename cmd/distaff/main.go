@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/sovereignite/shuttle/internal/phonehome"
+	"github.com/sovereignite/tender/internal/phonehome"
 )
 
 func main() {

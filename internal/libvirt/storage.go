@@ -17,8 +17,8 @@ import (
 
 	"github.com/digitalocean/go-libvirt"
 	"github.com/libvirt/libvirt-go-xml"
-	"github.com/sovereignite/shuttle/internal/images"
-	"github.com/sovereignite/shuttle/internal/isoimage"
+	"github.com/sovereignite/tender/internal/images"
+	"github.com/sovereignite/tender/internal/isoimage"
 )
 
 const (

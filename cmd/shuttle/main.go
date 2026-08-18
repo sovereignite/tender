@@ -7,13 +7,13 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/sovereignite/shuttle/internal/config"
-	"github.com/sovereignite/shuttle/internal/github"
-	"github.com/sovereignite/shuttle/internal/health"
-	"github.com/sovereignite/shuttle/internal/images"
-	"github.com/sovereignite/shuttle/internal/libvirt"
-	"github.com/sovereignite/shuttle/internal/logging"
-	"github.com/sovereignite/shuttle/internal/runner"
+	"github.com/sovereignite/tender/internal/config"
+	"github.com/sovereignite/tender/internal/github"
+	"github.com/sovereignite/tender/internal/health"
+	"github.com/sovereignite/tender/internal/images"
+	"github.com/sovereignite/tender/internal/libvirt"
+	"github.com/sovereignite/tender/internal/logging"
+	"github.com/sovereignite/tender/internal/runner"
 	"github.com/spf13/cobra"
 )
 

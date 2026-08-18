@@ -1,4 +1,4 @@
-module github.com/sovereignite/shuttle
+module github.com/sovereignite/tender
 
 go 1.26.5
 

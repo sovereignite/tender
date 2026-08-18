@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"text/template"
 
-	"github.com/sovereignite/shuttle/internal/isoimage"
+	"github.com/sovereignite/tender/internal/isoimage"
 )
 
 // Config holds the cloud-init configuration for a GitHub Actions runner.

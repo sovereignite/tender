@@ -8,10 +8,10 @@ import (
 	"time"
 
 	"github.com/mdlayher/vsock"
-	"github.com/sovereignite/shuttle/internal/cloudinit"
-	"github.com/sovereignite/shuttle/internal/images"
-	"github.com/sovereignite/shuttle/internal/libvirt"
-	"github.com/sovereignite/shuttle/internal/phonehome"
+	"github.com/sovereignite/tender/internal/cloudinit"
+	"github.com/sovereignite/tender/internal/images"
+	"github.com/sovereignite/tender/internal/libvirt"
+	"github.com/sovereignite/tender/internal/phonehome"
 )
 
 type PhoneHomeEvent struct {

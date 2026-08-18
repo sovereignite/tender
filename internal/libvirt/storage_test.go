@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	libvirtxml "github.com/libvirt/libvirt-go-xml"
-	"github.com/sovereignite/shuttle/internal/images"
+	"github.com/sovereignite/tender/internal/images"
 )
 
 func TestDerivedPoolXMLUsesReferenceParent(t *testing.T) {
